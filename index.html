@@ -161,6 +161,9 @@ window.addEventListener('message', function(event) {
 
   if (data.type === 'EVENT_MANUAL_SEARCH_RESULT' && data.requestId === manualSearchRequestId) {
     const response = data.response || {};
+    // Clear the request id immediately so a late server response after a timeout
+    // cannot overwrite a newer manual-search result.
+    manualSearchRequestId = '';
     const status = document.getElementById('manualSearchStatus');
     const select = document.getElementById('manualCandidateSelect');
     const useButton = document.getElementById('manualUseButton');
@@ -187,7 +190,7 @@ window.addEventListener('message', function(event) {
       if (item.checkedIn || item.blocked) option.disabled = true;
       select.appendChild(option);
     });
-    status.textContent = results.length + ' matching contractor(s) found. Select the correct person. Already checked-in contractors are disabled.';
+    status.textContent = results.length + ' matching contractor(s) found. Select the correct person. Already checked-in contractors are disabled. Server: ' + (response.serverMs || 0) + ' ms; total: ' + (response.bridgeServerMs || 0) + ' ms.';
     select.onchange = function() { useButton.disabled = !select.value; };
     return;
   }
@@ -205,7 +208,7 @@ window.addEventListener('message', function(event) {
       document.getElementById('companionRows').innerHTML = '';
       document.getElementById('groupPanel').style.display = 'block';
       document.getElementById('scanButton').style.display = 'none';
-      setResult('success', 'CONTRACTOR VERIFIED', 'Enter the names of all companions who arrived with this contractor. The camera stays on but pauses reading while this group is being confirmed.\nVerification round trip: ' + totalMs + ' ms.');
+      setResult('success', 'CONTRACTOR VERIFIED', 'Enter the names of all companions who arrived with this contractor. The camera stays on but pauses reading while this group is being confirmed.\nTotal round trip: ' + totalMs + ' ms\nApps Script server: ' + (response.serverMs || 0) + ' ms\nRegistration lookup: ' + (response.registrationLookupMs || 0) + ' ms\nAttendance lookup: ' + (response.attendanceLookupMs || 0) + ' ms\nBridge callback: ' + (response.bridgeServerMs || 0) + ' ms.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
       completedQrCodes.add(activeQrText);
       const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
@@ -224,7 +227,7 @@ window.addEventListener('message', function(event) {
     document.getElementById('confirmButton').disabled = false;
     if (response.status === 'SUCCESS') {
       completedQrCodes.add(activeQrText);
-      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms.';
+      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms\nApps Script server: ' + (response.serverMs || 0) + ' ms\nBridge callback: ' + (response.bridgeServerMs || 0) + ' ms.';
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
       activeCheckInMethod = 'QR';
@@ -242,7 +245,8 @@ window.addEventListener('message', function(event) {
       showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance record was created.');
     } else {
       isProcessing = false;
-      setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details and retry confirmation. The camera remains active but will not read another QR while this contractor is open.');
+      if (response.status === 'TIMEOUT') activeRequestId = '';
+      setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details and retry confirmation. If the previous save completed late, the server will return ALREADY CHECKED IN instead of creating a duplicate. The camera remains active but will not read another QR while this contractor is open.');
     }
   }
 });
