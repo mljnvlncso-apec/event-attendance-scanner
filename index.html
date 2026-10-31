@@ -21,6 +21,14 @@
     input{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:16px;outline:none;background:#061329;color:var(--cream)}input::placeholder{color:#8290a7}input:focus{border-color:var(--gold2)}
     .comp-row{display:flex;gap:7px;margin-top:8px}.comp-row input{flex:1;min-width:0}.comp-row button{width:43px;min-width:43px;margin:0;padding:8px;background:#692e33;color:#fff1eb;border-color:#a75b5e}
     .hint{font-size:11px;color:#b9c4d5;line-height:1.55;margin-top:9px}.foot{text-align:center;font-size:9px;color:#8b98ad;margin-top:19px;letter-spacing:2px}
+    .manualFallback{margin-top:16px;border:1px solid rgba(214,173,87,.28);border-radius:11px;background:rgba(214,173,87,.055);padding:12px}
+    .manualFallback summary{cursor:pointer;color:var(--gold2);font-size:11px;font-weight:800;letter-spacing:.7px;list-style:none}
+    .manualFallback summary::-webkit-details-marker{display:none}
+    .manualFallback summary:after{content:'＋';float:right;font-size:15px}
+    .manualFallback[open] summary:after{content:'−'}
+    .manualFallback select{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:13px;background:#061329;color:var(--cream);margin-top:9px}
+    .manualSearchRow{display:flex;gap:7px;margin-top:8px;align-items:center}.manualSearchRow input{flex:1;min-width:0}.manualSearchRow button{width:auto;min-width:95px;margin:0;padding:12px 10px}
+    .manualFallback .manualAction{margin-top:9px;padding:12px}.manualStatus{font-size:11px;color:#c7d0df;line-height:1.5;margin-top:8px;white-space:pre-line}
   </style>
 </head>
 <body>
@@ -37,6 +45,20 @@
   <div class="staff" id="staffLine">Connecting to the Apps Script attendance launcher…</div>
   <div id="reader"></div>
   <button id="scanButton" type="button" onclick="startScanner()" disabled>CONNECTING…</button>
+
+  <details class="manualFallback" id="manualFallback">
+    <summary>QR NOT WORKING? USE MANUAL CHECK-IN</summary>
+    <div class="hint">Search the registered contractor using their representative name, company, contact number, or Registration ID. Only active Attending registrations are listed.</div>
+    <div class="manualSearchRow">
+      <input id="manualSearchInput" type="search" maxlength="100" placeholder="Search registered contractor…" onkeydown="if(event.key==='Enter') searchManualCandidates()">
+      <button class="secondary" type="button" onclick="searchManualCandidates()">SEARCH</button>
+    </div>
+    <select id="manualCandidateSelect" aria-label="Registered contractor search results">
+      <option value="">Search to load registered contractors</option>
+    </select>
+    <button class="secondary manualAction" id="manualUseButton" type="button" onclick="useManualCandidate()" disabled>CONTINUE MANUAL CHECK-IN</button>
+    <div class="manualStatus" id="manualSearchStatus">The selected contractor will still be checked against the live registration and attendance records before saving.</div>
+  </details>
 
   <section id="groupPanel">
     <div class="title">Contractor Verified</div>
@@ -71,6 +93,9 @@ let activeRequestId = '';
 let activeQrText = '';
 let requestStartedAt = 0;
 let verifiedContractor = null;
+let activeCheckInMethod = 'QR';
+let manualSearchRequestId = '';
+let manualCandidateMap = {};
 let handshakeTimer = null;
 const completedQrCodes = new Set();
 const qrCooldownUntil = new Map();
@@ -106,6 +131,7 @@ function showNextReady(delay, title, details) {
     activeRequestId = '';
     activeQrText = '';
     const button = document.getElementById('scanButton');
+    button.style.display = 'block';
     if (isCameraRunning) {
       button.disabled = true;
       button.textContent = 'CAMERA ACTIVE · READY FOR NEXT QR';
@@ -133,12 +159,47 @@ window.addEventListener('message', function(event) {
     return;
   }
 
+  if (data.type === 'EVENT_MANUAL_SEARCH_RESULT' && data.requestId === manualSearchRequestId) {
+    const response = data.response || {};
+    const status = document.getElementById('manualSearchStatus');
+    const select = document.getElementById('manualCandidateSelect');
+    const useButton = document.getElementById('manualUseButton');
+    select.innerHTML = '';
+    manualCandidateMap = {};
+    useButton.disabled = true;
+    if (response.status !== 'SUCCESS') {
+      status.textContent = response.message || 'Unable to search registered contractors.';
+      return;
+    }
+    const results = Array.isArray(response.results) ? response.results : [];
+    if (!results.length) {
+      const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No matching active contractor found'; select.appendChild(empty);
+      status.textContent = 'No matching active Attending registration was found. Check the spelling or try the company name.';
+      return;
+    }
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Select the correct registered contractor…'; select.appendChild(placeholder);
+    results.forEach(function(item, index) {
+      const key = 'candidate_' + index;
+      manualCandidateMap[key] = item;
+      const option = document.createElement('option');
+      option.value = key;
+      option.textContent = item.name + ' — ' + item.company + ' · ID ' + String(item.registrationId).slice(-6) + (item.checkedIn ? ' · ALREADY CHECKED IN' : (item.blocked ? ' · CHECK-IN REVIEW REQUIRED' : ' · PENDING'));
+      if (item.checkedIn || item.blocked) option.disabled = true;
+      select.appendChild(option);
+    });
+    status.textContent = results.length + ' matching contractor(s) found. Select the correct person. Already checked-in contractors are disabled.';
+    select.onchange = function() { useButton.disabled = !select.value; };
+    return;
+  }
+
   if (data.type === 'EVENT_GROUP_PREPARE_RESULT' && data.requestId === activeRequestId) {
     const response = data.response || {};
     const totalMs = requestStartedAt ? Math.max(0, Math.round(performance.now() - requestStartedAt)) : 0;
     if (response.status === 'VERIFIED') {
       verifiedContractor = response;
+      activeCheckInMethod = 'QR';
       isProcessing = false;
+      document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Verified';
       document.getElementById('contractorName').textContent = response.name;
       document.getElementById('contractorCompany').textContent = response.company;
       document.getElementById('companionRows').innerHTML = '';
@@ -166,12 +227,17 @@ window.addEventListener('message', function(event) {
       const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms.';
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
+      activeCheckInMethod = 'QR';
+      document.getElementById('manualFallback').open = false;
+      document.getElementById('manualCandidateSelect').value = '';
+      document.getElementById('manualUseButton').disabled = true;
       setResult('success', '✅ GROUP CHECK-IN COMPLETE', details);
       showNextReady(1000, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded. The camera is still active; scan the next contractor QR.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
       completedQrCodes.add(activeQrText);
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
+      activeCheckInMethod = 'QR';
       setResult('warning', 'ALREADY RECORDED', response.name + ' already has an attendance record.');
       showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance record was created.');
     } else {
@@ -216,6 +282,50 @@ function startScanner() {
       button.disabled = false; button.textContent = 'RETRY CAMERA';
       setResult('error', 'CAMERA ERROR', explainCameraError(error));
     });
+}
+
+function searchManualCandidates() {
+  if (!authenticated || !window.opener || window.opener.closed) {
+    setResult('error', 'SCANNER CONNECTION REQUIRED', 'Open the scanner from the Apps Script entrance launcher.');
+    return;
+  }
+  const query = document.getElementById('manualSearchInput').value.trim();
+  if (query.length < 2) {
+    document.getElementById('manualSearchStatus').textContent = 'Enter at least two characters to search.';
+    document.getElementById('manualSearchInput').focus();
+    return;
+  }
+  manualSearchRequestId = makeId();
+  document.getElementById('manualSearchStatus').textContent = 'Searching the contractor registration list…';
+  document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Searching…</option>';
+  document.getElementById('manualUseButton').disabled = true;
+  window.opener.postMessage({type:'EVENT_MANUAL_SEARCH', requestId:manualSearchRequestId, query:query}, '*');
+}
+
+function useManualCandidate() {
+  if (isProcessing || verifiedContractor) return;
+  const key = document.getElementById('manualCandidateSelect').value;
+  const candidate = manualCandidateMap[key];
+  if (!candidate) {
+    document.getElementById('manualSearchStatus').textContent = 'Select a contractor first.';
+    return;
+  }
+  if (candidate.checkedIn || candidate.blocked) {
+    document.getElementById('manualSearchStatus').textContent = candidate.checkedIn ? 'This contractor is already checked in.' : 'This contractor has an incomplete check-in record. Ask an administrator to review it.';
+    return;
+  }
+  verifiedContractor = candidate;
+  activeCheckInMethod = 'MANUAL';
+  activeQrText = 'MANUAL|' + candidate.registrationId;
+  document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Selected · Manual Check-in';
+  document.getElementById('contractorName').textContent = candidate.name;
+  document.getElementById('contractorCompany').textContent = candidate.company;
+  document.getElementById('companionRows').innerHTML = '';
+  document.getElementById('groupPanel').style.display = 'block';
+  document.getElementById('scanButton').style.display = 'none';
+  document.getElementById('manualSearchStatus').textContent = 'Contractor selected from the active registration list. Verify the person is physically present before confirming.';
+  setResult('warning', 'MANUAL CHECK-IN SELECTED', candidate.name + '\n' + candidate.company + '\nNo QR scan was used. The server will re-check registration and duplicate attendance before saving.');
+  document.getElementById('groupPanel').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function handleQr(decodedText) {
@@ -275,7 +385,7 @@ function confirmGroup() {
   window.opener.postMessage({
     type: 'EVENT_GROUP_COMPLETE',
     requestId: activeRequestId,
-    payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: 'QR' }
+    payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: activeCheckInMethod }
   }, '*');
 }
 
@@ -284,13 +394,17 @@ function cancelGroup() {
   const cancelledQr = activeQrText;
   if (cancelledQr) qrCooldownUntil.set(cancelledQr, Date.now() + 1200);
   verifiedContractor = null;
+  activeCheckInMethod = 'QR';
   document.getElementById('groupPanel').style.display = 'none';
   isProcessing = false;
   activeRequestId = '';
   activeQrText = '';
   const button = document.getElementById('scanButton');
-  button.style.display = 'block'; button.disabled = true; button.textContent = 'CAMERA ACTIVE · READY FOR QR';
-  setResult('info', 'READY TO SCAN', 'The group was not recorded. The camera is still active.');
+  button.style.display = 'block';
+  if (isCameraRunning) { button.disabled = true; button.textContent = 'CAMERA ACTIVE · READY FOR QR'; }
+  else { button.disabled = false; button.textContent = 'START LIVE CAMERA SCANNER'; }
+  document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Verified';
+  setResult('info', 'READY TO SCAN', isCameraRunning ? 'The group was not recorded. The camera is still active.' : 'The group was not recorded. You can start the camera or use manual check-in.');
 }
 
 function explainCameraError(error) {
