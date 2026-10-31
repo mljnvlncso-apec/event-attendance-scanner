@@ -1,0 +1,670 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Event Attendance Scanner</title>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      background: #f0f2f5;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 460px;
+      padding: 24px 20px;
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 5px 25px rgba(0,0,0,.08);
+      text-align: center;
+    }
+
+    .logo {
+      font-size: 35px;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      margin: 0;
+      color: #1a1a1a;
+      font-size: 22px;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: #777;
+      line-height: 1.5;
+      margin: 10px 0 20px;
+    }
+
+    #reader {
+      width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #111;
+      min-height: 100px;
+    }
+
+    #reader video {
+      object-fit: cover;
+    }
+
+    #result {
+      margin-top: 18px;
+      padding: 18px 12px;
+      min-height: 100px;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 7px;
+      background: #f1f3f5;
+      color: #444;
+      white-space: pre-line;
+      overflow-wrap: anywhere;
+    }
+
+    .result-title {
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .result-details {
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .success {
+      background: #d1e7dd !important;
+      color: #146c43 !important;
+    }
+
+    .warning {
+      background: #fff3cd !important;
+      color: #856404 !important;
+    }
+
+    .error {
+      background: #f8d7da !important;
+      color: #842029 !important;
+    }
+
+    .loading {
+      background: #e7f3ff !important;
+      color: #0d6efd !important;
+    }
+
+    .button {
+      border: none;
+      width: 100%;
+      padding: 16px;
+      margin-top: 15px;
+      border-radius: 11px;
+      background: #198754;
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .footer {
+      margin-top: 18px;
+      font-size: 11px;
+      color: #999;
+      letter-spacing: .5px;
+    }
+
+    .connection {
+      margin: 14px 0;
+      font-size: 12px;
+      color: #555;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #198754;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div class="logo">📷</div>
+
+  <h2>Event Attendance</h2>
+
+  <div class="subtitle">
+    Entrance QR Code Scanner
+    <br>
+    Scan the participant's registration QR code.
+  </div>
+
+  <div class="connection" id="connection">
+    Checking connection to attendance system...
+  </div>
+
+  <div id="reader"></div>
+
+  <button
+    class="button"
+    id="scanButton"
+    onclick="startScanner()"
+    disabled
+  >
+    START CAMERA SCANNER
+  </button>
+
+  <div id="result">
+    <div class="result-title">Ready</div>
+    <div class="result-details">
+      Waiting for scanner connection.
+    </div>
+  </div>
+
+  <div class="footer">
+    EVENT ATTENDANCE MANAGEMENT SYSTEM
+  </div>
+
+</div>
+
+
+<script>
+
+/***************************************************
+ * CONFIGURATION
+ ***************************************************/
+
+var scanner = null;
+
+var isCameraRunning = false;
+
+var isProcessing = false;
+
+var currentRequestId = null;
+
+
+/***************************************************
+ * CHECK APPS SCRIPT CONNECTION
+ ***************************************************/
+
+window.addEventListener("load", function() {
+
+  if (!window.opener) {
+
+    showResult(
+      "error",
+      "NO ATTENDANCE CONNECTION",
+      "Please open this scanner using the Open Live Scanner button in your Google Apps Script attendance system."
+    );
+
+    document.getElementById("connection").textContent =
+      "⚠️ No Apps Script connection";
+
+    return;
+  }
+
+  document.getElementById("connection").innerHTML =
+    '<span class="dot"></span> Attendance system connection ready';
+
+  try {
+
+    if (typeof Html5Qrcode === "undefined") {
+
+      throw new Error("QR scanner library could not be loaded.");
+
+    }
+
+    scanner = new Html5Qrcode("reader", {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE
+      ],
+      verbose: false
+    });
+
+    document.getElementById("scanButton").disabled = false;
+
+    showResult(
+      "",
+      "READY TO SCAN",
+      "Press Start Camera Scanner to begin."
+    );
+
+  } catch (error) {
+
+    showResult(
+      "error",
+      "SCANNER INITIALIZATION ERROR",
+      error.message
+    );
+
+  }
+
+});
+
+
+/***************************************************
+ * START CAMERA
+ ***************************************************/
+
+function startScanner() {
+
+  if (!scanner || isCameraRunning || isProcessing) {
+    return;
+  }
+
+  var button = document.getElementById("scanButton");
+
+  button.disabled = true;
+  button.textContent = "OPENING CAMERA...";
+
+  showResult(
+    "loading",
+    "OPENING CAMERA",
+    "Please allow camera access."
+  );
+
+  var config = {
+    fps: 10,
+
+    qrbox: function(width, height) {
+
+      var size = Math.min(width, height, 280);
+
+      size = Math.max(150, Math.floor(size * 0.85));
+
+      return {
+        width: size,
+        height: size
+      };
+
+    },
+
+    aspectRatio: 1
+  };
+
+  scanner.start(
+    { facingMode: "environment" },
+    config,
+    handleQrScan
+  )
+
+  .then(function() {
+
+    isCameraRunning = true;
+
+    button.disabled = true;
+    button.textContent = "CAMERA ACTIVE";
+
+    showResult(
+      "loading",
+      "CAMERA READY",
+      "Point the camera at a participant's QR code."
+    );
+
+  })
+
+  .catch(function(error) {
+
+    button.disabled = false;
+    button.textContent = "RETRY CAMERA";
+
+    showResult(
+      "error",
+      "CAMERA ERROR",
+      explainCameraError(error)
+    );
+
+  });
+
+}
+
+
+/***************************************************
+ * HANDLE SCANNED QR CODE
+ ***************************************************/
+
+function handleQrScan(decodedText) {
+
+  if (isProcessing) {
+    return;
+  }
+
+  if (!window.opener || window.opener.closed) {
+
+    showResult(
+      "error",
+      "CONNECTION LOST",
+      "Please close this scanner and reopen it from the attendance system."
+    );
+
+    stopScanner();
+
+    return;
+  }
+
+  isProcessing = true;
+
+  currentRequestId =
+    Date.now().toString() + "-" +
+    Math.random().toString(36).substring(2);
+
+  document.getElementById("scanButton").disabled = true;
+
+  document.getElementById("scanButton").textContent =
+    "VERIFYING PARTICIPANT...";
+
+  showResult(
+    "loading",
+    "VERIFYING REGISTRATION",
+    "Checking participant details..."
+  );
+
+  stopScanner()
+
+    .then(function() {
+
+      // Send only the QR content to Apps Script.
+      // The parent validates the sender's origin.
+
+      try {
+
+        window.opener.postMessage({
+
+          type: "EVENT_ATTENDANCE_SCAN",
+
+          requestId: currentRequestId,
+
+          qrText: decodedText
+
+        }, "*");
+
+      } catch (error) {
+
+        showResult(
+          "error",
+          "CONNECTION ERROR",
+          error.message
+        );
+
+        resetButton();
+
+      }
+
+    });
+
+}
+
+
+/***************************************************
+ * RECEIVE APPS SCRIPT RESPONSE
+ ***************************************************/
+
+window.addEventListener("message", function(event) {
+
+  // Accept messages only from our opener.
+  if (event.source !== window.opener) {
+    return;
+  }
+
+  var data = event.data;
+
+  if (!data || data.type !== "EVENT_ATTENDANCE_RESULT") {
+    return;
+  }
+
+  if (data.requestId !== currentRequestId) {
+    return;
+  }
+
+  currentRequestId = null;
+
+  processResponse(data.response);
+
+  resetButton();
+
+});
+
+
+/***************************************************
+ * DISPLAY ATTENDANCE RESPONSE
+ ***************************************************/
+
+function processResponse(response) {
+
+  if (!response || !response.status) {
+
+    showResult(
+      "error",
+      "INVALID SERVER RESPONSE",
+      "Please contact the event administrator."
+    );
+
+    return;
+  }
+
+  switch (response.status) {
+
+    case "SUCCESS":
+
+      showResult(
+        "success",
+        "✅ ATTENDANCE RECORDED",
+        "Representative: " + response.name +
+        "\nCompany: " + response.company
+      );
+
+      break;
+
+
+    case "ALREADY_CHECKED_IN":
+
+      showResult(
+        "warning",
+        "⚠️ ALREADY CHECKED IN",
+        "Representative: " + response.name +
+        "\nCompany: " + response.company +
+        "\n\nThis participant already has an attendance record."
+      );
+
+      break;
+
+
+    case "NOT_REGISTERED":
+
+      showResult(
+        "error",
+        "❌ NOT REGISTERED",
+        response.message
+      );
+
+      break;
+
+
+    case "AMBIGUOUS_QR":
+
+      showResult(
+        "warning",
+        "NEW QR CODE REQUIRED",
+        response.message
+      );
+
+      break;
+
+
+    case "INVALID_QR":
+
+      showResult(
+        "error",
+        "INVALID QR CODE",
+        response.message
+      );
+
+      break;
+
+
+    default:
+
+      showResult(
+        "error",
+        "SYSTEM ERROR",
+        "Unknown attendance response."
+      );
+
+  }
+
+}
+
+
+/***************************************************
+ * STOP CAMERA
+ ***************************************************/
+
+function stopScanner() {
+
+  if (scanner && isCameraRunning) {
+
+    return scanner.stop()
+
+      .then(function() {
+
+        isCameraRunning = false;
+
+      })
+
+      .catch(function(error) {
+
+        isCameraRunning = false;
+
+      });
+
+  }
+
+  return Promise.resolve();
+
+}
+
+
+/***************************************************
+ * RESET FOR NEXT PARTICIPANT
+ ***************************************************/
+
+function resetButton() {
+
+  isProcessing = false;
+
+  var button = document.getElementById("scanButton");
+
+  button.disabled = false;
+
+  button.textContent = "SCAN NEXT PARTICIPANT";
+
+}
+
+
+/***************************************************
+ * DISPLAY RESULT
+ ***************************************************/
+
+function showResult(type, title, details) {
+
+  var result = document.getElementById("result");
+
+  result.className = "";
+
+  if (type) {
+    result.classList.add(type);
+  }
+
+  result.innerHTML = "";
+
+  var titleElement = document.createElement("div");
+
+  titleElement.className = "result-title";
+
+  titleElement.textContent = title;
+
+  var detailElement = document.createElement("div");
+
+  detailElement.className = "result-details";
+
+  detailElement.textContent = details || "";
+
+  result.appendChild(titleElement);
+
+  result.appendChild(detailElement);
+
+}
+
+
+/***************************************************
+ * CAMERA ERRORS
+ ***************************************************/
+
+function explainCameraError(error) {
+
+  var message = String(
+    error && error.message ? error.message : error
+  );
+
+  if (
+    message.includes("NotAllowedError") ||
+    message.includes("Permission")
+  ) {
+
+    return "Camera access was denied. Enable camera permission in your browser settings.";
+
+  }
+
+  if (
+    message.includes("NotFoundError") ||
+    message.includes("DevicesNotFoundError")
+  ) {
+
+    return "No available camera was found.";
+
+  }
+
+  if (
+    message.includes("NotReadableError") ||
+    message.includes("TrackStartError")
+  ) {
+
+    return "The camera may be in use by another application.";
+
+  }
+
+  return message;
+
+}
+
+</script>
+
+</body>
+</html>
