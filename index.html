@@ -97,6 +97,9 @@ let activeCheckInMethod = 'QR';
 let manualSearchRequestId = '';
 let manualCandidateMap = {};
 let handshakeTimer = null;
+let prepareWatchdog = null;
+let saveWatchdog = null;
+let manualSearchWatchdog = null;
 const completedQrCodes = new Set();
 const qrCooldownUntil = new Map();
 
@@ -160,6 +163,8 @@ window.addEventListener('message', function(event) {
   }
 
   if (data.type === 'EVENT_MANUAL_SEARCH_RESULT' && data.requestId === manualSearchRequestId) {
+    if (manualSearchWatchdog) clearTimeout(manualSearchWatchdog);
+    manualSearchWatchdog = null;
     const response = data.response || {};
     // Clear the request id immediately so a late server response after a timeout
     // cannot overwrite a newer manual-search result.
@@ -196,6 +201,8 @@ window.addEventListener('message', function(event) {
   }
 
   if (data.type === 'EVENT_GROUP_PREPARE_RESULT' && data.requestId === activeRequestId) {
+    if (prepareWatchdog) clearTimeout(prepareWatchdog);
+    prepareWatchdog = null;
     const response = data.response || {};
     const totalMs = requestStartedAt ? Math.max(0, Math.round(performance.now() - requestStartedAt)) : 0;
     if (response.status === 'VERIFIED') {
@@ -222,12 +229,14 @@ window.addEventListener('message', function(event) {
   }
 
   if (data.type === 'EVENT_GROUP_COMPLETE_RESULT' && data.requestId === activeRequestId) {
+    if (saveWatchdog) clearTimeout(saveWatchdog);
+    saveWatchdog = null;
     const response = data.response || {};
     const totalMs = requestStartedAt ? Math.max(0, Math.round(performance.now() - requestStartedAt)) : 0;
     document.getElementById('confirmButton').disabled = false;
     if (response.status === 'SUCCESS') {
       completedQrCodes.add(activeQrText);
-      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms\nApps Script server: ' + (response.serverMs || 0) + ' ms\nBridge callback: ' + (response.bridgeServerMs || 0) + ' ms.';
+      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms\nGoogle Sheets single-row write: ' + (response.sheetWriteMs || 0) + ' ms\nApps Script server: ' + (response.serverMs || 0) + ' ms\nBridge callback: ' + (response.bridgeServerMs || 0) + ' ms.';
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
       activeCheckInMethod = 'QR';
@@ -300,10 +309,20 @@ function searchManualCandidates() {
     return;
   }
   manualSearchRequestId = makeId();
+  const requestId = manualSearchRequestId;
+  if (manualSearchWatchdog) clearTimeout(manualSearchWatchdog);
+  manualSearchWatchdog = setTimeout(function() {
+    if (manualSearchRequestId !== requestId) return;
+    manualSearchRequestId = '';
+    manualSearchWatchdog = null;
+    document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Search timed out — try again</option>';
+    document.getElementById('manualSearchStatus').textContent = 'No response was received. The camera remains active. Check the connection and press SEARCH again.';
+    document.getElementById('manualUseButton').disabled = true;
+  }, 28000);
   document.getElementById('manualSearchStatus').textContent = 'Searching the contractor registration list…';
   document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Searching…</option>';
   document.getElementById('manualUseButton').disabled = true;
-  window.opener.postMessage({type:'EVENT_MANUAL_SEARCH', requestId:manualSearchRequestId, query:query}, '*');
+  window.opener.postMessage({type:'EVENT_MANUAL_SEARCH', requestId:requestId, query:query}, '*');
 }
 
 function useManualCandidate() {
@@ -352,7 +371,20 @@ function handleQr(decodedText) {
     isProcessing = false;
     return;
   }
-  window.opener.postMessage({ type: 'EVENT_GROUP_PREPARE', requestId: activeRequestId, qrText: decodedText }, '*');
+  const requestId = activeRequestId;
+  if (prepareWatchdog) clearTimeout(prepareWatchdog);
+  prepareWatchdog = setTimeout(function() {
+    if (activeRequestId !== requestId || !isProcessing || verifiedContractor) return;
+    prepareWatchdog = null;
+    activeRequestId = '';
+    isProcessing = false;
+    setResult('error', 'VERIFICATION RESPONSE NOT RECEIVED', 'The attendance launcher did not return a response. The camera is still active. Try scanning once more or use Manual Check-in. If the server is still processing, it will re-check duplicate attendance.');
+    const button = document.getElementById('scanButton');
+    button.style.display = 'block';
+    button.disabled = !isCameraRunning;
+    button.textContent = isCameraRunning ? 'CAMERA ACTIVE · READY TO RETRY' : 'START LIVE CAMERA SCANNER';
+  }, 24000);
+  window.opener.postMessage({ type: 'EVENT_GROUP_PREPARE', requestId: requestId, qrText: decodedText }, '*');
 }
 
 function addCompanionRow(value) {
@@ -379,16 +411,25 @@ function confirmGroup() {
   activeRequestId = makeId();
   requestStartedAt = performance.now();
   document.getElementById('confirmButton').disabled = true;
-  setResult('info', 'SAVING GROUP ATTENDANCE', 'Writing contractor and companion records to Google Sheets…');
+  setResult('info', 'SAVING GROUP ATTENDANCE', 'Saving one contractor group record with all companion names…');
   if (!window.opener || window.opener.closed) {
     isProcessing = false;
     document.getElementById('confirmButton').disabled = false;
     setResult('error', 'CONNECTION LOST', 'Reopen the scanner from the Apps Script launcher.');
     return;
   }
+  const requestId = activeRequestId;
+  if (saveWatchdog) clearTimeout(saveWatchdog);
+  saveWatchdog = setTimeout(function() {
+    if (activeRequestId !== requestId || !isProcessing) return;
+    saveWatchdog = null;
+    isProcessing = false;
+    document.getElementById('confirmButton').disabled = false;
+    setResult('error', 'SAVE RESPONSE NOT RECEIVED', 'The server did not return a confirmation. Do not assume the save failed; it may still finish. Wait briefly, then retry the same contractor. Duplicate protection should return ALREADY CHECKED IN if the first save completed.');
+  }, 45000);
   window.opener.postMessage({
     type: 'EVENT_GROUP_COMPLETE',
-    requestId: activeRequestId,
+    requestId: requestId,
     payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: activeCheckInMethod }
   }, '*');
 }
