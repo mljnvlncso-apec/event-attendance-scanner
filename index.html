@@ -1,690 +1,275 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <title>Event Attendance Scanner</title>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Attendance — Live Scanner</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-
   <style>
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      padding: 20px;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-family: Arial, sans-serif;
-      background: #f0f2f5;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 460px;
-      padding: 24px 20px;
-      background: white;
-      border-radius: 18px;
-      box-shadow: 0 5px 25px rgba(0,0,0,.08);
-      text-align: center;
-    }
-
-    .logo {
-      font-size: 35px;
-      margin-bottom: 8px;
-    }
-
-    h2 {
-      margin: 0;
-      color: #1a1a1a;
-      font-size: 22px;
-    }
-
-    .subtitle {
-      font-size: 13px;
-      color: #777;
-      line-height: 1.5;
-      margin: 10px 0 20px;
-    }
-
-    #reader {
-      width: 100%;
-      overflow: hidden;
-      border-radius: 12px;
-      background: #111;
-      min-height: 100px;
-    }
-
-    #reader video {
-      object-fit: cover;
-    }
-
-    #result {
-      margin-top: 18px;
-      padding: 18px 12px;
-      min-height: 100px;
-      border-radius: 12px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 7px;
-      background: #f1f3f5;
-      color: #444;
-      white-space: pre-line;
-      overflow-wrap: anywhere;
-    }
-
-    .result-title {
-      font-size: 18px;
-      font-weight: 800;
-    }
-
-    .result-details {
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    .success {
-      background: #d1e7dd !important;
-      color: #146c43 !important;
-    }
-
-    .warning {
-      background: #fff3cd !important;
-      color: #856404 !important;
-    }
-
-    .error {
-      background: #f8d7da !important;
-      color: #842029 !important;
-    }
-
-    .loading {
-      background: #e7f3ff !important;
-      color: #0d6efd !important;
-    }
-
-    .button {
-      border: none;
-      width: 100%;
-      padding: 16px;
-      margin-top: 15px;
-      border-radius: 11px;
-      background: #198754;
-      color: white;
-      font-size: 16px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-
-    .button:disabled {
-      opacity: .55;
-      cursor: not-allowed;
-    }
-
-    .footer {
-      margin-top: 18px;
-      font-size: 11px;
-      color: #999;
-      letter-spacing: .5px;
-    }
-
-    .connection {
-      margin: 14px 0;
-      font-size: 12px;
-      color: #555;
-    }
-
-    .dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      background: #198754;
-      border-radius: 50%;
-      margin-right: 5px;
-    }
+    :root{--night:#050b1b;--navy:#091735;--gold:#d6ad57;--gold2:#f6df9a;--cream:#fff8e8;--muted:#b9c1d0;--line:rgba(214,173,87,.32)}
+    *{box-sizing:border-box}body{margin:0;padding:18px;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 86% 6%,rgba(244,190,88,.2),transparent 12rem),radial-gradient(circle at 8% 75%,rgba(230,171,65,.1),transparent 11rem),linear-gradient(145deg,#030816,#091735 55%,#030817);color:var(--cream);font-family:Arial,Helvetica,sans-serif}
+    .app{width:100%;max-width:510px;background:linear-gradient(155deg,rgba(15,34,68,.98),rgba(5,13,31,.98));border:1px solid var(--line);border-radius:19px;padding:21px;box-shadow:0 18px 55px rgba(0,0,0,.42)}
+    .poster{display:block;width:58px;height:88px;object-fit:cover;margin:0 auto 10px;border:1px solid var(--gold);box-shadow:0 4px 18px rgba(0,0,0,.4)}.top{text-align:center}.brand{color:var(--gold);font-size:9px;letter-spacing:2.6px;font-weight:bold}.mark{font-size:11px;color:#e0d6c2;letter-spacing:2px;margin-top:5px}.top h1{font-family:Georgia,serif;font-size:34px;font-weight:400;color:var(--gold2);margin:6px 0 1px}.muted{font-size:12px;color:#c3ccda;line-height:1.55}
+    .staff{margin:13px 0;padding:9px 12px;background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.2);border-radius:9px;font-size:11px;color:#e7d6ad;text-align:center}
+    #reader{width:100%;overflow:hidden;border-radius:12px;background:#030711;min-height:80px;margin-top:15px;border:1px solid rgba(214,173,87,.3)}#reader video{object-fit:cover}
+    button{border:1px solid #f2d58c;border-radius:10px;padding:14px 15px;font-size:12px;letter-spacing:.7px;font-weight:800;cursor:pointer;width:100%;margin-top:12px;background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.secondary{background:transparent;color:var(--gold2);border-color:rgba(214,173,87,.45)}button.blue{background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.danger{background:#692e33;color:#fff1eb;border-color:#a75b5e}button:disabled{opacity:.55;cursor:not-allowed}
+    #result{margin-top:15px;border-radius:11px;padding:15px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);min-height:80px;display:flex;flex-direction:column;justify-content:center;gap:6px;white-space:pre-line;overflow-wrap:anywhere;color:#e3e8f0}
+    .title{font-family:Georgia,serif;font-size:18px;font-weight:400;color:var(--gold2)}.detail{font-size:12px;line-height:1.55}.success{background:rgba(55,112,77,.22)!important;color:#e0f7e6}.warning{background:rgba(157,111,37,.22)!important;color:#ffedbd}.error{background:rgba(150,44,40,.22)!important;color:#ffe2dd}.info{background:rgba(40,83,140,.25)!important;color:#dceaff}
+    #groupPanel{display:none;margin-top:17px;padding:15px;border:1px solid var(--line);border-radius:12px;background:rgba(2,10,27,.46)}
+    .person{background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.18);border-radius:9px;padding:12px;margin-top:8px;text-align:left}.person strong{display:block;font-family:Georgia,serif;font-size:16px;color:var(--gold2)}.person span{font-size:11px;color:#c5cfdd}
+    label{display:block;font-weight:700;font-size:10px;margin:15px 0 6px;text-transform:uppercase;color:var(--gold2);letter-spacing:1px}
+    input{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:16px;outline:none;background:#061329;color:var(--cream)}input::placeholder{color:#8290a7}input:focus{border-color:var(--gold2)}
+    .comp-row{display:flex;gap:7px;margin-top:8px}.comp-row input{flex:1;min-width:0}.comp-row button{width:43px;min-width:43px;margin:0;padding:8px;background:#692e33;color:#fff1eb;border-color:#a75b5e}
+    .hint{font-size:11px;color:#b9c4d5;line-height:1.55;margin-top:9px}.foot{text-align:center;font-size:9px;color:#8b98ad;margin-top:19px;letter-spacing:2px}
   </style>
 </head>
-
 <body>
+<main class="app">
+  <header class="top">
+    <img class="poster" src="https://mljnvlncso-apec.github.io/event-attendance-scanner/event-poster.jpg" alt="APEC Gala invitation" onerror="this.style.display='none'">
+    <div class="brand">APEC HOMES · BUILDING LIVES</div>
+    <h1>APEC Gala</h1>
+    <div class="mark">FASHION EDITION · CONTRACTORS' YEAR-END PARTY 2026</div>
+    <div class="muted">Entrance Check-in · Saturday, 19 December 2026</div>
+  </header>
 
-<div class="container">
-
-  <div class="logo">📷</div>
-
-  <h2>Event Attendance</h2>
-
-  <div class="subtitle">
-    Entrance QR Code Scanner
-    <br>
-    Scan the participant's registration QR code.
-  </div>
-
-  <div class="connection" id="connection">
-    Checking connection to attendance system...
-  </div>
-
+  <div class="staff" id="staffLine">Connecting to the Apps Script attendance launcher…</div>
   <div id="reader"></div>
+  <button id="scanButton" type="button" onclick="startScanner()" disabled>CONNECTING…</button>
 
-  <button
-    class="button"
-    id="scanButton"
-    onclick="startScanner()"
-    disabled
-  >
-    START CAMERA SCANNER
-  </button>
+  <section id="groupPanel">
+    <div class="title">Contractor Verified</div>
+    <div class="person">
+      <strong id="contractorName"></strong>
+      <span id="contractorCompany"></span>
+    </div>
+
+    <label>Companion names</label>
+    <div class="muted">Add the full name of every companion who arrived together with this contractor. Leave the list empty if there are no companions. There is no configured companion limit.</div>
+    <div id="companionRows"></div>
+    <button class="secondary" type="button" onclick="addCompanionRow()">＋ ADD COMPANION</button>
+    <div class="hint">Important: Group check-in is final after confirmation. Late companions cannot be added. Check that every name is correct before saving.</div>
+    <button class="blue" id="confirmButton" type="button" onclick="confirmGroup()">CONFIRM GROUP ATTENDANCE</button>
+    <button class="secondary" type="button" onclick="cancelGroup()">CANCEL / SCAN AGAIN</button>
+  </section>
 
   <div id="result">
-    <div class="result-title">Ready</div>
-    <div class="result-details">
-      Waiting for scanner connection.
-    </div>
+    <div class="title">Waiting for connection</div>
+    <div class="detail">Open this page through the Apps Script scanner launcher.</div>
   </div>
-
-  <div class="footer">
-    EVENT ATTENDANCE MANAGEMENT SYSTEM
-  </div>
-
-</div>
-
+  <div class="foot">APEC HOMES · APEC GALA · FASHION EDITION</div>
+</main>
 
 <script>
+let scanner = null;
+let authenticated = false;
+let staffName = '';
+let isCameraRunning = false;
+let isProcessing = false;
+let activeRequestId = '';
+let verifiedContractor = null;
+let handshakeTimer = null;
 
-/***************************************************
- * CONFIGURATION
- ***************************************************/
+function setResult(type, title, details) {
+  const el = document.getElementById('result');
+  el.className = type || '';
+  el.innerHTML = '';
+  const h = document.createElement('div'); h.className = 'title'; h.textContent = title;
+  const p = document.createElement('div'); p.className = 'detail'; p.textContent = details || '';
+  el.appendChild(h); el.appendChild(p);
+}
 
-var scanner = null;
+function makeId() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); }
 
-var isCameraRunning = false;
-
-var isProcessing = false;
-
-var currentRequestId = null;
-
-
-/***************************************************
- * CHECK APPS SCRIPT CONNECTION
- ***************************************************/
-
-window.addEventListener("load", function() {
-
-  if (!window.opener) {
-
-    showResult(
-      "error",
-      "NO ATTENDANCE CONNECTION",
-      "Please open this scanner using the Open Live Scanner button in your Google Apps Script attendance system."
-    );
-
-    document.getElementById("connection").textContent =
-      "⚠️ No Apps Script connection";
-
+function handshake() {
+  if (!window.opener || window.opener.closed) {
+    document.getElementById('staffLine').textContent = 'No Apps Script launcher connection';
+    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
     return;
   }
+  window.opener.postMessage({ type: 'EVENT_SCANNER_READY' }, '*');
+  handshakeTimer = setInterval(function() {
+    if (authenticated) { clearInterval(handshakeTimer); return; }
+    if (!window.opener || window.opener.closed) { clearInterval(handshakeTimer); return; }
+    window.opener.postMessage({ type: 'EVENT_SCANNER_READY' }, '*');
+  }, 1000);
+}
 
-  document.getElementById("connection").innerHTML =
-    '<span class="dot"></span> Attendance system connection ready';
+window.addEventListener('message', function(event) {
+  if (event.source !== window.opener) return;
+  const data = event.data || {};
 
-  try {
-
-    if (typeof Html5Qrcode === "undefined") {
-
-      throw new Error("QR scanner library could not be loaded.");
-
-    }
-
-    scanner = new Html5Qrcode("reader", {
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.QR_CODE
-      ],
-      verbose: false
-    });
-
-    document.getElementById("scanButton").disabled = false;
-
-    showResult(
-      "",
-      "READY TO SCAN",
-      "Press Start Camera Scanner to begin."
-    );
-
-  } catch (error) {
-
-    showResult(
-      "error",
-      "SCANNER INITIALIZATION ERROR",
-      error.message
-    );
-
+  if (data.type === 'EVENT_SCANNER_AUTH') {
+    if (data.authenticated !== true) return;
+    authenticated = true;
+    staffName = String(data.staffName || 'Event Staff');
+    if (handshakeTimer) clearInterval(handshakeTimer);
+    document.getElementById('staffLine').textContent = 'Signed in as: ' + staffName;
+    document.getElementById('scanButton').disabled = false;
+    document.getElementById('scanButton').textContent = 'START LIVE CAMERA SCANNER';
+    setResult('info', 'READY TO SCAN', 'Press Start Live Camera Scanner and point the camera at a contractor QR code.');
   }
 
+  if (data.type === 'EVENT_GROUP_PREPARE_RESULT' && data.requestId === activeRequestId) {
+    isProcessing = false;
+    const response = data.response || {};
+    if (response.status === 'VERIFIED') {
+      verifiedContractor = response;
+      document.getElementById('contractorName').textContent = response.name;
+      document.getElementById('contractorCompany').textContent = response.company;
+      document.getElementById('companionRows').innerHTML = '';
+      document.getElementById('groupPanel').style.display = 'block';
+      document.getElementById('scanButton').style.display = 'none';
+      setResult('success', 'CONTRACTOR VERIFIED', 'Enter all companion names who arrived with this contractor.');
+    } else if (response.status === 'ALREADY_CHECKED_IN') {
+      const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
+      setResult('warning', 'ALREADY CHECKED IN', response.name + '\n' + response.company + '\nPreviously checked in: ' + (response.timestamp || 'Yes') + names);
+      resetForNext('SCAN NEXT CONTRACTOR');
+    } else if (response.status === 'GROUP_INCOMPLETE') {
+      setResult('error', 'GROUP RECORD NEEDS REVIEW', response.message || 'Contact the administrator.');
+      resetForNext('TRY ANOTHER QR');
+    } else {
+      setResult('error', response.status || 'QR NOT ACCEPTED', response.message || 'This contractor could not be verified.');
+      resetForNext('TRY ANOTHER QR');
+    }
+  }
+
+  if (data.type === 'EVENT_GROUP_COMPLETE_RESULT' && data.requestId === activeRequestId) {
+    isProcessing = false;
+    const response = data.response || {};
+    document.getElementById('confirmButton').disabled = false;
+    if (response.status === 'SUCCESS') {
+      setResult('success', '✅ GROUP CHECK-IN COMPLETE',
+        response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy);
+      document.getElementById('groupPanel').style.display = 'none';
+      verifiedContractor = null;
+      resetForNext('SCAN NEXT CONTRACTOR');
+    } else if (response.status === 'ALREADY_CHECKED_IN') {
+      setResult('warning', 'ALREADY CHECKED IN', response.name + ' already has an attendance record.');
+      document.getElementById('groupPanel').style.display = 'none';
+      verifiedContractor = null;
+      resetForNext('SCAN NEXT CONTRACTOR');
+    } else {
+      setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details. No successful confirmation was returned.');
+      document.getElementById('confirmButton').disabled = false;
+    }
+  }
 });
 
-
-/***************************************************
- * START CAMERA
- ***************************************************/
+window.addEventListener('load', function() {
+  if (typeof Html5Qrcode === 'undefined') {
+    setResult('error', 'SCANNER LIBRARY ERROR', 'Could not load the QR scanning library. Check the internet connection.');
+    return;
+  }
+  scanner = new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+  handshake();
+});
 
 function startScanner() {
-
-  if (!scanner || isCameraRunning || isProcessing) {
-    return;
-  }
-
-  var button = document.getElementById("scanButton");
-
-  button.disabled = true;
-  button.textContent = "OPENING CAMERA...";
-
-  showResult(
-    "loading",
-    "OPENING CAMERA",
-    "Please allow camera access."
-  );
-
-  var config = {
+  if (!authenticated) { setResult('error', 'NOT CONNECTED', 'Return to the Apps Script launcher and sign in.'); return; }
+  if (!scanner || isCameraRunning || isProcessing) return;
+  const button = document.getElementById('scanButton');
+  button.disabled = true; button.textContent = 'OPENING CAMERA…';
+  setResult('info', 'OPENING CAMERA', 'Allow camera access if your browser asks.');
+  const config = {
     fps: 10,
-
     qrbox: function(width, height) {
-
-      var size = Math.min(width, height, 280);
-
-      size = Math.max(150, Math.floor(size * 0.85));
-
-      return {
-        width: size,
-        height: size
-      };
-
+      const side = Math.max(150, Math.floor(Math.min(width, height, 300) * 0.82));
+      return { width: side, height: side };
     },
-
     aspectRatio: 1
   };
-
-  scanner.start(
-    { facingMode: "environment" },
-    config,
-    handleQrScan
-  )
-
-  .then(function() {
-
-    isCameraRunning = true;
-
-    button.disabled = true;
-    button.textContent = "CAMERA ACTIVE";
-
-    showResult(
-      "loading",
-      "CAMERA READY",
-      "Point the camera at a participant's QR code."
-    );
-
-  })
-
-  .catch(function(error) {
-
-    button.disabled = false;
-    button.textContent = "RETRY CAMERA";
-
-    showResult(
-      "error",
-      "CAMERA ERROR",
-      explainCameraError(error)
-    );
-
-  });
-
+  scanner.start({ facingMode: 'environment' }, config, handleQr)
+    .then(function() {
+      isCameraRunning = true;
+      button.disabled = true; button.textContent = 'CAMERA ACTIVE';
+      setResult('info', 'CAMERA READY', 'Point the camera at the contractor QR code.');
+    })
+    .catch(function(error) {
+      button.disabled = false; button.textContent = 'RETRY CAMERA';
+      setResult('error', 'CAMERA ERROR', explainCameraError(error));
+    });
 }
 
+function handleQr(decodedText) {
+  if (isProcessing || verifiedContractor) return;
+  isProcessing = true;
+  activeRequestId = makeId();
+  const button = document.getElementById('scanButton');
+  button.disabled = true; button.textContent = 'VERIFYING QR…';
+  stopCamera().then(function() {
+    setResult('info', 'VERIFYING CONTRACTOR', 'Checking the registration record…');
+    if (!window.opener || window.opener.closed) {
+      setResult('error', 'CONNECTION LOST', 'Close this scanner and reopen it from the Apps Script launcher.');
+      isProcessing = false; return;
+    }
+    window.opener.postMessage({ type: 'EVENT_GROUP_PREPARE', requestId: activeRequestId, qrText: decodedText }, '*');
+  });
+}
 
-/***************************************************
- * HANDLE SCANNED QR CODE
- ***************************************************/
+function stopCamera() {
+  if (scanner && isCameraRunning) {
+    return scanner.stop().then(function() { isCameraRunning = false; }).catch(function() { isCameraRunning = false; });
+  }
+  return Promise.resolve();
+}
 
-function handleQrScan(decodedText) {
+function addCompanionRow(value) {
+  const container = document.getElementById('companionRows');
+  const row = document.createElement('div'); row.className = 'comp-row';
+  const input = document.createElement('input'); input.type = 'text'; input.maxLength = 150; input.placeholder = 'Companion full name'; input.value = value || '';
+  input.setAttribute('aria-label', 'Companion full name');
+  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.title = 'Remove companion'; remove.onclick = function() { row.remove(); };
+  row.appendChild(input); row.appendChild(remove); container.appendChild(row); input.focus();
+}
 
-  if (isProcessing) {
+function confirmGroup() {
+  if (!verifiedContractor || isProcessing) return;
+  const inputs = Array.from(document.querySelectorAll('#companionRows input'));
+  const names = inputs.map(input => input.value.trim());
+  if (names.some(name => !name)) {
+    setResult('error', 'COMPANION NAME REQUIRED', 'Complete every companion name or remove the empty row.');
     return;
   }
-
-  if (!window.opener || window.opener.closed) {
-
-    showResult(
-      "error",
-      "CONNECTION LOST",
-      "Please close this scanner and reopen it from the attendance system."
-    );
-
-    stopScanner();
-
-    return;
-  }
+  const confirmText = 'Confirm attendance for ' + verifiedContractor.name + ' and ' + names.length + ' companion(s)?\n\nLate companions cannot be added after confirmation.';
+  if (!window.confirm(confirmText)) return;
 
   isProcessing = true;
-
-  currentRequestId =
-    Date.now().toString() + "-" +
-    Math.random().toString(36).substring(2);
-
-  document.getElementById("scanButton").disabled = true;
-
-  document.getElementById("scanButton").textContent =
-    "VERIFYING PARTICIPANT...";
-
-  showResult(
-    "loading",
-    "VERIFYING REGISTRATION",
-    "Checking participant details..."
-  );
-
-  stopScanner()
-
-    .then(function() {
-
-      // Send only the QR content to Apps Script.
-      // The parent validates the sender's origin.
-
-      try {
-
-        window.opener.postMessage({
-
-          type: "EVENT_ATTENDANCE_SCAN",
-
-          requestId: currentRequestId,
-
-          qrText: decodedText
-
-        }, "*");
-
-      } catch (error) {
-
-        showResult(
-          "error",
-          "CONNECTION ERROR",
-          error.message
-        );
-
-        resetButton();
-
-      }
-
-    });
-
+  activeRequestId = makeId();
+  document.getElementById('confirmButton').disabled = true;
+  setResult('info', 'SAVING GROUP ATTENDANCE', 'Writing contractor and companion records to Google Sheets…');
+  window.opener.postMessage({
+    type: 'EVENT_GROUP_COMPLETE',
+    requestId: activeRequestId,
+    payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: 'QR' }
+  }, '*');
 }
 
-
-/***************************************************
- * RECEIVE APPS SCRIPT RESPONSE
- ***************************************************/
-
-window.addEventListener("message", function(event) {
-
-  // Accept messages only from our opener.
-  if (event.source !== window.opener) {
-    return;
-  }
-
-  var data = event.data;
-
-  if (!data || data.type !== "EVENT_ATTENDANCE_RESULT") {
-    return;
-  }
-
-  if (data.requestId !== currentRequestId) {
-    return;
-  }
-
-  currentRequestId = null;
-
-  processResponse(data.response);
-
-  resetButton();
-
-});
-
-
-/***************************************************
- * DISPLAY ATTENDANCE RESPONSE
- ***************************************************/
-
-function processResponse(response) {
-
-  if (!response || !response.status) {
-
-    showResult(
-      "error",
-      "INVALID SERVER RESPONSE",
-      "Please contact the event administrator."
-    );
-
-    return;
-  }
-
-  switch (response.status) {
-
-    case "SUCCESS":
-
-      showResult(
-        "success",
-        "✅ ATTENDANCE RECORDED",
-        "Representative: " + response.name +
-        "\nCompany: " + response.company
-      );
-
-      break;
-
-
-    case "ALREADY_CHECKED_IN":
-
-      showResult(
-        "warning",
-        "⚠️ ALREADY CHECKED IN",
-        "Representative: " + response.name +
-        "\nCompany: " + response.company +
-        "\n\nThis participant already has an attendance record."
-      );
-
-      break;
-
-
-    case "NOT_REGISTERED":
-
-      showResult(
-        "error",
-        "❌ NOT REGISTERED",
-        response.message
-      );
-
-      break;
-
-
-    case "AMBIGUOUS_QR":
-
-      showResult(
-        "warning",
-        "NEW QR CODE REQUIRED",
-        response.message
-      );
-
-      break;
-
-
-    case "INVALID_QR":
-
-      case "SYSTEM_ERROR":
-
-  showResult(
-    "error",
-    "❌ ATTENDANCE SYSTEM ERROR",
-    response.message || "Please contact the administrator."
-  );
-
-  break;
-
-
-case "SYSTEM_BUSY":
-
-  showResult(
-    "warning",
-    "⚠️ SYSTEM BUSY",
-    response.message || "Please try scanning again."
-  );
-
-  break;
-      showResult(
-        "error",
-        "INVALID QR CODE",
-        response.message
-      );
-
-      break;
-
-
-    default:
-
-      showResult(
-        "error",
-        "SYSTEM ERROR",
-        "Unknown attendance response."
-      );
-
-  }
-
+function cancelGroup() {
+  if (isProcessing) return;
+  verifiedContractor = null;
+  document.getElementById('groupPanel').style.display = 'none';
+  document.getElementById('scanButton').style.display = 'block';
+  document.getElementById('scanButton').disabled = false;
+  document.getElementById('scanButton').textContent = 'SCAN CONTRACTOR QR';
+  setResult('', 'READY TO SCAN', 'The previous group was not recorded. Scan the contractor QR again when ready.');
 }
 
-
-/***************************************************
- * STOP CAMERA
- ***************************************************/
-
-function stopScanner() {
-
-  if (scanner && isCameraRunning) {
-
-    return scanner.stop()
-
-      .then(function() {
-
-        isCameraRunning = false;
-
-      })
-
-      .catch(function(error) {
-
-        isCameraRunning = false;
-
-      });
-
-  }
-
-  return Promise.resolve();
-
-}
-
-
-/***************************************************
- * RESET FOR NEXT PARTICIPANT
- ***************************************************/
-
-function resetButton() {
-
+function resetForNext(label) {
+  verifiedContractor = null;
   isProcessing = false;
-
-  var button = document.getElementById("scanButton");
-
-  button.disabled = false;
-
-  button.textContent = "SCAN NEXT PARTICIPANT";
-
+  document.getElementById('groupPanel').style.display = 'none';
+  const button = document.getElementById('scanButton');
+  button.style.display = 'block'; button.disabled = false; button.textContent = label || 'SCAN NEXT CONTRACTOR';
 }
-
-
-/***************************************************
- * DISPLAY RESULT
- ***************************************************/
-
-function showResult(type, title, details) {
-
-  var result = document.getElementById("result");
-
-  result.className = "";
-
-  if (type) {
-    result.classList.add(type);
-  }
-
-  result.innerHTML = "";
-
-  var titleElement = document.createElement("div");
-
-  titleElement.className = "result-title";
-
-  titleElement.textContent = title;
-
-  var detailElement = document.createElement("div");
-
-  detailElement.className = "result-details";
-
-  detailElement.textContent = details || "";
-
-  result.appendChild(titleElement);
-
-  result.appendChild(detailElement);
-
-}
-
-
-/***************************************************
- * CAMERA ERRORS
- ***************************************************/
 
 function explainCameraError(error) {
-
-  var message = String(
-    error && error.message ? error.message : error
-  );
-
-  if (
-    message.includes("NotAllowedError") ||
-    message.includes("Permission")
-  ) {
-
-    return "Camera access was denied. Enable camera permission in your browser settings.";
-
-  }
-
-  if (
-    message.includes("NotFoundError") ||
-    message.includes("DevicesNotFoundError")
-  ) {
-
-    return "No available camera was found.";
-
-  }
-
-  if (
-    message.includes("NotReadableError") ||
-    message.includes("TrackStartError")
-  ) {
-
-    return "The camera may be in use by another application.";
-
-  }
-
+  const message = String(error && error.message ? error.message : error);
+  if (message.includes('NotAllowedError') || message.includes('Permission')) return 'Camera permission was denied. Enable camera access for this GitHub Pages website in browser settings.';
+  if (message.includes('NotFoundError') || message.includes('DevicesNotFoundError')) return 'No available camera was found on this device.';
+  if (message.includes('NotReadableError') || message.includes('TrackStartError')) return 'The camera may be in use by another application. Close other camera apps and retry.';
   return message;
-
 }
-
 </script>
-
 </body>
 </html>
