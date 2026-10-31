@@ -10,7 +10,7 @@
     *{box-sizing:border-box}body{margin:0;padding:18px;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 86% 6%,rgba(244,190,88,.2),transparent 12rem),radial-gradient(circle at 8% 75%,rgba(230,171,65,.1),transparent 11rem),linear-gradient(145deg,#030816,#091735 55%,#030817);color:var(--cream);font-family:Arial,Helvetica,sans-serif}
     .app{width:100%;max-width:510px;background:linear-gradient(155deg,rgba(15,34,68,.98),rgba(5,13,31,.98));border:1px solid var(--line);border-radius:19px;padding:21px;box-shadow:0 18px 55px rgba(0,0,0,.42)}
     .poster{display:block;width:58px;height:88px;object-fit:cover;margin:0 auto 10px;border:1px solid var(--gold);box-shadow:0 4px 18px rgba(0,0,0,.4)}.top{text-align:center}.brand{color:var(--gold);font-size:9px;letter-spacing:2.6px;font-weight:bold}.mark{font-size:11px;color:#e0d6c2;letter-spacing:2px;margin-top:5px}.top h1{font-family:Georgia,serif;font-size:34px;font-weight:400;color:var(--gold2);margin:6px 0 1px}.muted{font-size:12px;color:#c3ccda;line-height:1.55}
-    .staff{margin:13px 0;padding:9px 12px;background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.2);border-radius:9px;font-size:11px;color:#e7d6ad;text-align:center}
+    .staff{margin:13px 0;padding:9px 12px;background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.2);border-radius:9px;font-size:11px;color:#e7d6ad;text-align:center}.venue{margin:12px 0;padding:11px;border:1px solid rgba(214,173,87,.2);border-radius:9px;background:rgba(214,173,87,.06);text-align:center;color:#e7dfd0;font-size:11px;line-height:1.6}.venue b{color:var(--gold2)}.mapLink{color:var(--gold2);font-weight:800;text-decoration:none;border-bottom:1px solid var(--gold)}
     #reader{width:100%;overflow:hidden;border-radius:12px;background:#030711;min-height:80px;margin-top:15px;border:1px solid rgba(214,173,87,.3)}#reader video{object-fit:cover}
     button{border:1px solid #f2d58c;border-radius:10px;padding:14px 15px;font-size:12px;letter-spacing:.7px;font-weight:800;cursor:pointer;width:100%;margin-top:12px;background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.secondary{background:transparent;color:var(--gold2);border-color:rgba(214,173,87,.45)}button.blue{background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.danger{background:#692e33;color:#fff1eb;border-color:#a75b5e}button:disabled{opacity:.55;cursor:not-allowed}
     #result{margin-top:15px;border-radius:11px;padding:15px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);min-height:80px;display:flex;flex-direction:column;justify-content:center;gap:6px;white-space:pre-line;overflow-wrap:anywhere;color:#e3e8f0}
@@ -30,7 +30,8 @@
     <div class="brand">APEC HOMES · BUILDING LIVES</div>
     <h1>APEC Gala</h1>
     <div class="mark">FASHION EDITION · CONTRACTORS' YEAR-END PARTY 2026</div>
-    <div class="muted">Entrance Check-in · Saturday, 19 December 2026</div>
+    <div class="muted">Contractors' Year-End Party 2026</div>
+    <div class="venue"><b>PODIUM HALL</b><br>Level 6, The Podium · 12 ADB Avenue, Ortigas Center, Mandaluyong City<br><a class="mapLink" href="https://www.google.com/maps/search/?api=1&query=The+Podium+Hall%2C+6th+Floor%2C+The+Podium%2C+12+ADB+Avenue%2C+Ortigas+Center%2C+Mandaluyong+City%2C+Metro+Manila" target="_blank" rel="noopener noreferrer">VIEW IN GOOGLE MAPS ↗</a></div>
   </header>
 
   <div class="staff" id="staffLine">Connecting to the Apps Script attendance launcher…</div>
@@ -63,7 +64,7 @@
 <script>
 let scanner = null;
 let authenticated = false;
-let staffName = '';
+let scannerSessionLabel = 'Entrance Scanner';
 let isCameraRunning = false;
 let isProcessing = false;
 let activeRequestId = '';
@@ -102,9 +103,9 @@ window.addEventListener('message', function(event) {
   if (data.type === 'EVENT_SCANNER_AUTH') {
     if (data.authenticated !== true) return;
     authenticated = true;
-    staffName = String(data.staffName || 'Event Staff');
+    scannerSessionLabel = String(data.sessionLabel || 'Entrance Scanner connected');
     if (handshakeTimer) clearInterval(handshakeTimer);
-    document.getElementById('staffLine').textContent = 'Signed in as: ' + staffName;
+    document.getElementById('staffLine').textContent = scannerSessionLabel + ' · No PIN sign-in required';
     document.getElementById('scanButton').disabled = false;
     document.getElementById('scanButton').textContent = 'START LIVE CAMERA SCANNER';
     setResult('info', 'READY TO SCAN', 'Press Start Live Camera Scanner and point the camera at a contractor QR code.');
@@ -166,7 +167,7 @@ window.addEventListener('load', function() {
 });
 
 function startScanner() {
-  if (!authenticated) { setResult('error', 'NOT CONNECTED', 'Return to the Apps Script launcher and sign in.'); return; }
+  if (!authenticated) { setResult('error', 'NOT CONNECTED', 'Return to the Apps Script launcher and open the live scanner again.'); return; }
   if (!scanner || isCameraRunning || isProcessing) return;
   const button = document.getElementById('scanButton');
   button.disabled = true; button.textContent = 'OPENING CAMERA…';
@@ -270,6 +271,7 @@ function explainCameraError(error) {
   if (message.includes('NotReadableError') || message.includes('TrackStartError')) return 'The camera may be in use by another application. Close other camera apps and retry.';
   return message;
 }
+document.querySelectorAll('img[src*=' + '"event-poster.jpg"' + ']').forEach(function(img){ const base=img.src.split('?')[0]; img.src=base+'?v='+Date.now(); });
 </script>
 </body>
 </html>
