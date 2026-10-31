@@ -69,6 +69,7 @@ let isCameraRunning = false;
 let isProcessing = false;
 let activeRequestId = '';
 let activeQrText = '';
+let requestStartedAt = 0;
 let verifiedContractor = null;
 let handshakeTimer = null;
 const completedQrCodes = new Set();
@@ -134,6 +135,7 @@ window.addEventListener('message', function(event) {
 
   if (data.type === 'EVENT_GROUP_PREPARE_RESULT' && data.requestId === activeRequestId) {
     const response = data.response || {};
+    const totalMs = requestStartedAt ? Math.max(0, Math.round(performance.now() - requestStartedAt)) : 0;
     if (response.status === 'VERIFIED') {
       verifiedContractor = response;
       isProcessing = false;
@@ -142,7 +144,7 @@ window.addEventListener('message', function(event) {
       document.getElementById('companionRows').innerHTML = '';
       document.getElementById('groupPanel').style.display = 'block';
       document.getElementById('scanButton').style.display = 'none';
-      setResult('success', 'CONTRACTOR VERIFIED', 'Enter the names of all companions who arrived with this contractor. The camera stays on but pauses reading while this group is being confirmed.');
+      setResult('success', 'CONTRACTOR VERIFIED', 'Enter the names of all companions who arrived with this contractor. The camera stays on but pauses reading while this group is being confirmed.\nVerification round trip: ' + totalMs + ' ms.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
       completedQrCodes.add(activeQrText);
       const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
@@ -157,10 +159,11 @@ window.addEventListener('message', function(event) {
 
   if (data.type === 'EVENT_GROUP_COMPLETE_RESULT' && data.requestId === activeRequestId) {
     const response = data.response || {};
+    const totalMs = requestStartedAt ? Math.max(0, Math.round(performance.now() - requestStartedAt)) : 0;
     document.getElementById('confirmButton').disabled = false;
     if (response.status === 'SUCCESS') {
       completedQrCodes.add(activeQrText);
-      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy;
+      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms.';
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
       setResult('success', '✅ GROUP CHECK-IN COMPLETE', details);
@@ -225,6 +228,7 @@ function handleQr(decodedText) {
   isProcessing = true;
   activeRequestId = makeId();
   activeQrText = decodedText;
+  requestStartedAt = performance.now();
   // Prevent the same image from firing repeated requests while it remains in frame.
   qrCooldownUntil.set(decodedText, now + 10000);
   setResult('info', 'VERIFYING CONTRACTOR', 'Checking the registration record. The camera remains active.');
@@ -259,6 +263,7 @@ function confirmGroup() {
 
   isProcessing = true;
   activeRequestId = makeId();
+  requestStartedAt = performance.now();
   document.getElementById('confirmButton').disabled = true;
   setResult('info', 'SAVING GROUP ATTENDANCE', 'Writing contractor and companion records to Google Sheets…');
   if (!window.opener || window.opener.closed) {
