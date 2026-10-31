@@ -520,6 +520,26 @@ function processResponse(response) {
 
     case "INVALID_QR":
 
+      case "SYSTEM_ERROR":
+
+  showResult(
+    "error",
+    "❌ ATTENDANCE SYSTEM ERROR",
+    response.message || "Please contact the administrator."
+  );
+
+  break;
+
+
+case "SYSTEM_BUSY":
+
+  showResult(
+    "warning",
+    "⚠️ SYSTEM BUSY",
+    response.message || "Please try scanning again."
+  );
+
+  break;
       showResult(
         "error",
         "INVALID QR CODE",
