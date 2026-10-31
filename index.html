@@ -68,8 +68,11 @@ let scannerSessionLabel = 'Entrance Scanner';
 let isCameraRunning = false;
 let isProcessing = false;
 let activeRequestId = '';
+let activeQrText = '';
 let verifiedContractor = null;
 let handshakeTimer = null;
+const completedQrCodes = new Set();
+const qrCooldownUntil = new Map();
 
 function setResult(type, title, details) {
   const el = document.getElementById('result');
@@ -93,7 +96,24 @@ function handshake() {
     if (authenticated) { clearInterval(handshakeTimer); return; }
     if (!window.opener || window.opener.closed) { clearInterval(handshakeTimer); return; }
     window.opener.postMessage({ type: 'EVENT_SCANNER_READY' }, '*');
-  }, 1000);
+  }, 900);
+}
+
+function showNextReady(delay, title, details) {
+  window.setTimeout(function() {
+    isProcessing = false;
+    activeRequestId = '';
+    activeQrText = '';
+    const button = document.getElementById('scanButton');
+    if (isCameraRunning) {
+      button.disabled = true;
+      button.textContent = 'CAMERA ACTIVE · READY FOR NEXT QR';
+    } else {
+      button.disabled = false;
+      button.textContent = 'START LIVE CAMERA SCANNER';
+    }
+    setResult('info', title || 'READY FOR NEXT CONTRACTOR', details || 'The camera is still active. Present the next contractor QR code.');
+  }, delay == null ? 1300 : delay);
 }
 
 window.addEventListener('message', function(event) {
@@ -108,51 +128,52 @@ window.addEventListener('message', function(event) {
     document.getElementById('staffLine').textContent = scannerSessionLabel + ' · No PIN sign-in required';
     document.getElementById('scanButton').disabled = false;
     document.getElementById('scanButton').textContent = 'START LIVE CAMERA SCANNER';
-    setResult('info', 'READY TO SCAN', 'Press Start Live Camera Scanner and point the camera at a contractor QR code.');
+    setResult('info', 'READY TO SCAN', 'Press Start Live Camera Scanner. The camera will remain active between contractors.');
+    return;
   }
 
   if (data.type === 'EVENT_GROUP_PREPARE_RESULT' && data.requestId === activeRequestId) {
-    isProcessing = false;
     const response = data.response || {};
     if (response.status === 'VERIFIED') {
       verifiedContractor = response;
+      isProcessing = false;
       document.getElementById('contractorName').textContent = response.name;
       document.getElementById('contractorCompany').textContent = response.company;
       document.getElementById('companionRows').innerHTML = '';
       document.getElementById('groupPanel').style.display = 'block';
       document.getElementById('scanButton').style.display = 'none';
-      setResult('success', 'CONTRACTOR VERIFIED', 'Enter all companion names who arrived with this contractor.');
+      setResult('success', 'CONTRACTOR VERIFIED', 'Enter the names of all companions who arrived with this contractor. The camera stays on but pauses reading while this group is being confirmed.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
+      completedQrCodes.add(activeQrText);
       const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
-      setResult('warning', 'ALREADY CHECKED IN', response.name + '\n' + response.company + '\nPreviously checked in: ' + (response.timestamp || 'Yes') + names);
-      resetForNext('SCAN NEXT CONTRACTOR');
-    } else if (response.status === 'GROUP_INCOMPLETE') {
-      setResult('error', 'GROUP RECORD NEEDS REVIEW', response.message || 'Contact the administrator.');
-      resetForNext('TRY ANOTHER QR');
+      setResult('warning', 'ALREADY RECORDED · ALREADY CHECKED IN', response.name + '\n' + response.company + '\nPreviously checked in: ' + (response.timestamp || 'Yes') + names + '\n\nThe scanner is ready for the next contractor.');
+      showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'This contractor already has an attendance record. Present the next QR code.');
     } else {
-      setResult('error', response.status || 'QR NOT ACCEPTED', response.message || 'This contractor could not be verified.');
-      resetForNext('TRY ANOTHER QR');
+      const title = response.status === 'NOT_REGISTERED' ? 'NOT REGISTERED' : (response.status || 'QR NOT ACCEPTED');
+      setResult('error', title, (response.message || 'This contractor could not be verified.') + '\n\nYou may scan the next contractor without reloading.');
+      showNextReady(1100, 'READY FOR NEXT CONTRACTOR', 'The camera is still active. Present the next QR code.');
     }
   }
 
   if (data.type === 'EVENT_GROUP_COMPLETE_RESULT' && data.requestId === activeRequestId) {
-    isProcessing = false;
     const response = data.response || {};
     document.getElementById('confirmButton').disabled = false;
     if (response.status === 'SUCCESS') {
-      setResult('success', '✅ GROUP CHECK-IN COMPLETE',
-        response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy);
+      completedQrCodes.add(activeQrText);
+      const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy;
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
-      resetForNext('SCAN NEXT CONTRACTOR');
+      setResult('success', '✅ GROUP CHECK-IN COMPLETE', details);
+      showNextReady(1000, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded. The camera is still active; scan the next contractor QR.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
-      setResult('warning', 'ALREADY CHECKED IN', response.name + ' already has an attendance record.');
+      completedQrCodes.add(activeQrText);
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
-      resetForNext('SCAN NEXT CONTRACTOR');
+      setResult('warning', 'ALREADY RECORDED', response.name + ' already has an attendance record.');
+      showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance record was created.');
     } else {
-      setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details. No successful confirmation was returned.');
-      document.getElementById('confirmButton').disabled = false;
+      isProcessing = false;
+      setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details and retry confirmation. The camera remains active but will not read another QR while this contractor is open.');
     }
   }
 });
@@ -173,18 +194,20 @@ function startScanner() {
   button.disabled = true; button.textContent = 'OPENING CAMERA…';
   setResult('info', 'OPENING CAMERA', 'Allow camera access if your browser asks.');
   const config = {
-    fps: 10,
+    fps: 12,
     qrbox: function(width, height) {
-      const side = Math.max(150, Math.floor(Math.min(width, height, 300) * 0.82));
+      const usable = Math.min(width, height, 320);
+      const side = Math.min(usable, Math.max(120, Math.floor(usable * 0.84)));
       return { width: side, height: side };
     },
-    aspectRatio: 1
+    aspectRatio: 1,
+    rememberLastUsedCamera: true
   };
   scanner.start({ facingMode: 'environment' }, config, handleQr)
     .then(function() {
       isCameraRunning = true;
-      button.disabled = true; button.textContent = 'CAMERA ACTIVE';
-      setResult('info', 'CAMERA READY', 'Point the camera at the contractor QR code.');
+      button.disabled = true; button.textContent = 'CAMERA ACTIVE · READY FOR QR';
+      setResult('info', 'CAMERA READY', 'Point the camera at the contractor QR code. The camera will stay active for continuous check-in.');
     })
     .catch(function(error) {
       button.disabled = false; button.textContent = 'RETRY CAMERA';
@@ -193,26 +216,25 @@ function startScanner() {
 }
 
 function handleQr(decodedText) {
-  if (isProcessing || verifiedContractor) return;
+  if (isProcessing || verifiedContractor || !authenticated) return;
+  const now = Date.now();
+  if (completedQrCodes.has(decodedText)) return;
+  const cooldown = qrCooldownUntil.get(decodedText) || 0;
+  if (now < cooldown) return;
+
   isProcessing = true;
   activeRequestId = makeId();
-  const button = document.getElementById('scanButton');
-  button.disabled = true; button.textContent = 'VERIFYING QR…';
-  stopCamera().then(function() {
-    setResult('info', 'VERIFYING CONTRACTOR', 'Checking the registration record…');
-    if (!window.opener || window.opener.closed) {
-      setResult('error', 'CONNECTION LOST', 'Close this scanner and reopen it from the Apps Script launcher.');
-      isProcessing = false; return;
-    }
-    window.opener.postMessage({ type: 'EVENT_GROUP_PREPARE', requestId: activeRequestId, qrText: decodedText }, '*');
-  });
-}
+  activeQrText = decodedText;
+  // Prevent the same image from firing repeated requests while it remains in frame.
+  qrCooldownUntil.set(decodedText, now + 10000);
+  setResult('info', 'VERIFYING CONTRACTOR', 'Checking the registration record. The camera remains active.');
 
-function stopCamera() {
-  if (scanner && isCameraRunning) {
-    return scanner.stop().then(function() { isCameraRunning = false; }).catch(function() { isCameraRunning = false; });
+  if (!window.opener || window.opener.closed) {
+    setResult('error', 'CONNECTION LOST', 'Close this scanner and reopen it from the Apps Script launcher.');
+    isProcessing = false;
+    return;
   }
-  return Promise.resolve();
+  window.opener.postMessage({ type: 'EVENT_GROUP_PREPARE', requestId: activeRequestId, qrText: decodedText }, '*');
 }
 
 function addCompanionRow(value) {
@@ -239,6 +261,12 @@ function confirmGroup() {
   activeRequestId = makeId();
   document.getElementById('confirmButton').disabled = true;
   setResult('info', 'SAVING GROUP ATTENDANCE', 'Writing contractor and companion records to Google Sheets…');
+  if (!window.opener || window.opener.closed) {
+    isProcessing = false;
+    document.getElementById('confirmButton').disabled = false;
+    setResult('error', 'CONNECTION LOST', 'Reopen the scanner from the Apps Script launcher.');
+    return;
+  }
   window.opener.postMessage({
     type: 'EVENT_GROUP_COMPLETE',
     requestId: activeRequestId,
@@ -248,20 +276,16 @@ function confirmGroup() {
 
 function cancelGroup() {
   if (isProcessing) return;
+  const cancelledQr = activeQrText;
+  if (cancelledQr) qrCooldownUntil.set(cancelledQr, Date.now() + 1200);
   verifiedContractor = null;
   document.getElementById('groupPanel').style.display = 'none';
-  document.getElementById('scanButton').style.display = 'block';
-  document.getElementById('scanButton').disabled = false;
-  document.getElementById('scanButton').textContent = 'SCAN CONTRACTOR QR';
-  setResult('', 'READY TO SCAN', 'The previous group was not recorded. Scan the contractor QR again when ready.');
-}
-
-function resetForNext(label) {
-  verifiedContractor = null;
   isProcessing = false;
-  document.getElementById('groupPanel').style.display = 'none';
+  activeRequestId = '';
+  activeQrText = '';
   const button = document.getElementById('scanButton');
-  button.style.display = 'block'; button.disabled = false; button.textContent = label || 'SCAN NEXT CONTRACTOR';
+  button.style.display = 'block'; button.disabled = true; button.textContent = 'CAMERA ACTIVE · READY FOR QR';
+  setResult('info', 'READY TO SCAN', 'The group was not recorded. The camera is still active.');
 }
 
 function explainCameraError(error) {
@@ -271,7 +295,8 @@ function explainCameraError(error) {
   if (message.includes('NotReadableError') || message.includes('TrackStartError')) return 'The camera may be in use by another application. Close other camera apps and retry.';
   return message;
 }
-document.querySelectorAll('img[src*=' + '"event-poster.jpg"' + ']').forEach(function(img){ const base=img.src.split('?')[0]; img.src=base+'?v='+Date.now(); });
+
+document.querySelectorAll('img[src*="event-poster.jpg"]').forEach(function(img){ const base=img.src.split('?')[0]; img.src=base+'?v='+Date.now(); });
 </script>
 </body>
 </html>
