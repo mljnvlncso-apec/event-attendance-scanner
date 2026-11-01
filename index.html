@@ -140,7 +140,14 @@ function allowedLauncherOrigin_(value) {
   try {
     const u = new URL(String(value || ''));
     const host = u.hostname.toLowerCase();
-    const allowed = host === 'script.google.com' || host === 'script.googleusercontent.com' || host.endsWith('.script.googleusercontent.com');
+    // Apps Script may serve HtmlService from either the canonical host or a
+    // Google-managed user-content host with a generated prefix separated by
+    // a hyphen (for example, <id>-script.googleusercontent.com).
+    const allowed =
+      host === 'script.google.com' ||
+      host === 'script.googleusercontent.com' ||
+      host.endsWith('.script.googleusercontent.com') ||
+      host.endsWith('-script.googleusercontent.com');
     return u.protocol === 'https:' && allowed && !u.username && !u.password && !u.port ? u.origin : '';
   } catch (err) { return ''; }
 }
@@ -190,6 +197,7 @@ function handshake() {
   }
   notifyLauncherReady_();
   if (handshakeTimer) clearInterval(handshakeTimer);
+  let handshakeAttempts = 0;
   handshakeTimer = setInterval(function() {
     if (authenticated) { clearInterval(handshakeTimer); handshakeTimer = null; return; }
     if (!window.opener || window.opener.closed) {
@@ -197,7 +205,11 @@ function handshake() {
       setResult('error', 'LAUNCHER DISCONNECTED', 'Return to the Apps Script launcher and open a new scanner session.');
       return;
     }
+    handshakeAttempts++;
     notifyLauncherReady_();
+    if (handshakeAttempts === 8) {
+      setResult('warning', 'LAUNCHER AUTHENTICATION PENDING', 'The scanner tab is open, but it has not received the Apps Script session yet. Keep the launcher tab open. Confirm that the latest Scanner.html deployment and this index.html version are both published.');
+    }
   }, 1000);
 }
 
@@ -463,7 +475,10 @@ window.addEventListener('message', function(event) {
     // Accept the session token only from an approved Apps Script origin and
     // from the exact opener window that launched this scanner.
     const verifiedOrigin = allowedLauncherOrigin_(event.origin);
-    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) return;
+    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) {
+      console.warn('Rejected scanner AUTH message from an unapproved launcher origin:', event.origin);
+      return;
+    }
     const receivedToken = String(data.scannerToken || '');
     if (!receivedToken.startsWith('EA1.')) return;
     expectedLauncherOrigin = verifiedOrigin;
