@@ -82,6 +82,8 @@
 
 // Scanner state
 let scanner = null;
+let scannerInitializationReady = false;
+let scannerInitializationMessage = '';
 let authenticated = false;
 let scannerSessionToken = '';
 let scannerStaffName = 'Entrance Staff';
@@ -140,46 +142,33 @@ function allowedLauncherOrigin_(value) {
   try {
     const u = new URL(String(value || ''));
     const host = u.hostname.toLowerCase();
-    const allowed = host === 'script.google.com' || host === 'script.googleusercontent.com' || host.endsWith('.script.googleusercontent.com');
+    // Apps Script may serve HtmlService from either the canonical host or a
+    // Google-managed user-content host with a generated prefix separated by
+    // a hyphen (for example, <id>-script.googleusercontent.com).
+    const allowed =
+      host === 'script.google.com' ||
+      host === 'script.googleusercontent.com' ||
+      host.endsWith('.script.googleusercontent.com') ||
+      host.endsWith('-script.googleusercontent.com');
     return u.protocol === 'https:' && allowed && !u.username && !u.password && !u.port ? u.origin : '';
   } catch (err) { return ''; }
 }
 
 function checkUrlHashAuth() {
-  // 1. Check existing session in sessionStorage (survives mobile refresh & orientation changes)
-  const savedToken = sessionStorage.getItem('APEC_SCANNER_TOKEN');
-  const savedStaff = sessionStorage.getItem('APEC_SCANNER_STAFF');
-  if (savedToken && savedStaff) {
-    scannerSessionToken = savedToken;
-    scannerStaffName = savedStaff;
-    scannerSessionLabel = 'Entrance staff: ' + scannerStaffName;
-    authenticated = true;
-    return true;
+  // The fragment carries only a version marker, never a session token or a
+  // claimed launcher origin. The actual launcher origin is learned from the
+  // authenticated postMessage handshake below.
+  const params = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+  const bridgeVersion = params.get('bridgeVersion');
+  try { history.replaceState(null, document.title, window.location.pathname + window.location.search); } catch (err) {}
+  authenticated = false;
+  scannerSessionToken = '';
+  expectedLauncherOrigin = '';
+  if (bridgeVersion !== '12') {
+    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
+    return false;
   }
-
-  // 2. Parse session from URL hash if provided by launcher
-  const rawHash = (window.location.hash || '').replace(/^#/, '');
-  const params = new URLSearchParams(rawHash);
-  const token = params.get('session');
-  const staff = params.get('staff');
-
-  if (token && token.startsWith('EA1.')) {
-    scannerSessionToken = token;
-    scannerStaffName = staff ? decodeURIComponent(staff) : 'Entrance Staff';
-    scannerSessionLabel = 'Entrance staff: ' + scannerStaffName;
-    authenticated = true;
-    sessionStorage.setItem('APEC_SCANNER_TOKEN', scannerSessionToken);
-    sessionStorage.setItem('APEC_SCANNER_STAFF', scannerStaffName);
-    return true;
-  }
-
-  // 3. Fallback: check if opened from window.opener for postMessage handshake
-  if (window.opener && !window.opener.closed) {
-    return true;
-  }
-
-  setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
-  return false;
+  return true;
 }
 
 function notifyLauncherReady_() {
@@ -203,42 +192,30 @@ function postToLauncher(message) {
 
 function handshake() {
   if (!checkUrlHashAuth()) return;
-
-  if (authenticated) {
-    document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Ready';
-    const button = document.getElementById('scanButton');
-    button.disabled = false;
-    button.textContent = 'START LIVE CAMERA SCANNER';
-    updateNetworkState();
-    restorePendingDraft();
-    if (!verifiedContractor) {
-      setResult('info', 'READY TO SCAN', 'Connected for ' + scannerStaffName + '. Press Start Live Camera Scanner.');
-    }
-  }
-
   if (!window.opener || window.opener.closed) {
-    if (!authenticated) {
-      document.getElementById('staffLine').textContent = 'No Apps Script launcher connection';
-      setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
-    } else {
-      document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Ready (Launcher in background)';
-    }
+    document.getElementById('staffLine').textContent = 'No Apps Script launcher connection';
+    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
     return;
   }
+  setResult('info', 'CONNECTING TO LAUNCHER', 'The scanner is checking the Apps Script session. Keep the launcher tab open.');
   notifyLauncherReady_();
   if (handshakeTimer) clearInterval(handshakeTimer);
+  let handshakeAttempts = 0;
   handshakeTimer = setInterval(function() {
-    if (authenticated && expectedLauncherOrigin) {
-      clearInterval(handshakeTimer);
-      handshakeTimer = null;
-      return;
-    }
+    if (authenticated) { clearInterval(handshakeTimer); handshakeTimer = null; return; }
     if (!window.opener || window.opener.closed) {
-      clearInterval(handshakeTimer);
-      handshakeTimer = null;
+      clearInterval(handshakeTimer); handshakeTimer = null;
+      setResult('error', 'LAUNCHER DISCONNECTED', 'Return to the Apps Script launcher and open a new scanner session.');
       return;
     }
+    handshakeAttempts++;
     notifyLauncherReady_();
+    if (handshakeAttempts === 8) {
+      setResult('warning', 'LAUNCHER AUTHENTICATION PENDING', 'The popup is connected, but no valid session message has arrived. Check that Scanner.html and index.html are both updated and deployed.');
+    }
+    if (handshakeAttempts === 15 && !authenticated) {
+      setResult('error', 'NO AUTHENTICATION RESPONSE', 'The launcher is not completing the secure handshake. Check Apps Script deployment version and browser console for an origin mismatch.');
+    }
   }, 1000);
 }
 
@@ -504,7 +481,11 @@ window.addEventListener('message', function(event) {
     // Accept the session token only from an approved Apps Script origin and
     // from the exact opener window that launched this scanner.
     const verifiedOrigin = allowedLauncherOrigin_(event.origin);
-    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) return;
+    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) {
+      console.warn('Rejected scanner AUTH message from an unapproved launcher origin:', event.origin);
+      setResult('error', 'LAUNCHER ORIGIN REJECTED', 'The Apps Script popup sent an authentication message from an origin that is not on the approved Google Apps Script allowlist. Origin: ' + String(event.origin || '(empty)'));
+      return;
+    }
     const receivedToken = String(data.scannerToken || '');
     if (!receivedToken.startsWith('EA1.')) return;
     expectedLauncherOrigin = verifiedOrigin;
@@ -512,16 +493,20 @@ window.addEventListener('message', function(event) {
     scannerStaffName = String(data.staffName || 'Entrance Staff');
     scannerSessionLabel = String(data.sessionLabel || ('Entrance staff: ' + scannerStaffName));
     authenticated = true;
-    sessionStorage.setItem('APEC_SCANNER_TOKEN', scannerSessionToken);
-    sessionStorage.setItem('APEC_SCANNER_STAFF', scannerStaffName);
     if (handshakeTimer) { clearInterval(handshakeTimer); handshakeTimer = null; }
     document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Secure launcher connection';
     const button = document.getElementById('scanButton');
-    button.disabled = false;
-    button.textContent = 'START LIVE CAMERA SCANNER';
     updateNetworkState();
     restorePendingDraft();
-    if (!verifiedContractor) setResult('info', 'READY TO SCAN', 'Connected for ' + scannerStaffName + '. Press Start Live Camera Scanner.');
+    if (scannerInitializationReady) {
+      button.disabled = false;
+      button.textContent = 'START LIVE CAMERA SCANNER';
+      if (!verifiedContractor) setResult('info', 'READY TO SCAN', 'Connected for ' + scannerStaffName + '. Press Start Live Camera Scanner.');
+    } else {
+      button.disabled = true;
+      button.textContent = 'CAMERA LIBRARY NOT READY';
+      setResult('error', 'LAUNCHER CONNECTED · CAMERA UNAVAILABLE', scannerInitializationMessage || 'The scanner library did not initialize. Check the vendor library file and reload this page.');
+    }
     return;
   }
 
@@ -626,7 +611,8 @@ function showNextReady(delay, title, details) {
 
 function startScanner() {
   if (!authenticated || !scannerSessionToken) { setResult('error', 'NOT CONNECTED', 'Return to the Apps Script launcher and open the live scanner again.'); return; }
-  if (!scanner || isCameraRunning || isProcessing) return;
+  if (!scannerInitializationReady || !scanner) { setResult('error', 'CAMERA LIBRARY NOT READY', scannerInitializationMessage || 'The local QR scanner library could not initialize.'); return; }
+  if (isCameraRunning || isProcessing) return;
   const button = document.getElementById('scanButton');
   button.disabled = true; button.textContent = 'OPENING CAMERA…';
   setResult('info', 'OPENING CAMERA', 'Allow camera access if your browser asks.');
@@ -797,20 +783,52 @@ window.addEventListener('offline', updateNetworkState);
 
 window.addEventListener('load', function() {
   updateNetworkState();
-  if (typeof Html5Qrcode === 'undefined') {
-    setResult('error', 'SCANNER LIBRARY ERROR', 'The locally hosted QR scanner library could not be loaded. Check that vendor/html5-qrcode-2.3.8.min.js exists in your GitHub repository.');
-    document.getElementById('scanButton').disabled = true;
-    handshake();
-    return;
-  }
-  scanner = new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+
+  // Start the secure launcher handshake BEFORE camera-library initialization.
+  // A camera-library/global-enum error must never leave the page stuck on the
+  // static 'Waiting for connection' message.
   handshake();
+
+  try {
+    if (typeof Html5Qrcode === 'undefined') {
+      throw new Error('The locally hosted QR scanner library did not load. Check that vendor/html5-qrcode-2.3.8.min.js exists in GitHub.');
+    }
+    const qrOptions = { verbose: false };
+    if (typeof Html5QrcodeSupportedFormats !== 'undefined' && Html5QrcodeSupportedFormats && Html5QrcodeSupportedFormats.QR_CODE !== undefined) {
+      qrOptions.formatsToSupport = [Html5QrcodeSupportedFormats.QR_CODE];
+    }
+    // If the optional format enum is unavailable, initialize without a filter.
+    scanner = new Html5Qrcode('reader', qrOptions);
+    scannerInitializationReady = true;
+    scannerInitializationMessage = '';
+  } catch (initError) {
+    console.error('QR scanner initialization failed:', initError);
+    scannerInitializationReady = false;
+    scannerInitializationMessage = initError && initError.message ? initError.message : String(initError);
+    setResult('error', 'CAMERA LIBRARY INITIALIZATION ERROR', scannerInitializationMessage);
+    document.getElementById('scanButton').disabled = true;
+  }
+
   Promise.all([getOfflineRosterAll_(), getPendingOfflineGroups_()]).then(function(values) {
     offlineRosterCount = values[0].length;
     document.getElementById('offlineStoreStatus').textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s) saved on this device · Pending groups: ' + values[1].length;
-  }).catch(function(err) { document.getElementById('offlineStoreStatus').textContent = err.message || 'Offline storage is unavailable in this browser.'; });
-  document.querySelectorAll('img[src*="event-poster.jpg"]').forEach(function(img) { const base = img.src.split('?')[0]; img.src = base + '?v=' + Date.now(); });
+  }).catch(function(err) {
+    document.getElementById('offlineStoreStatus').textContent = err && err.message ? err.message : 'Offline storage is unavailable in this browser.';
+  });
+  document.querySelectorAll('img[src*=\"event-poster.jpg\"]').forEach(function(img) {
+    const base = img.src.split('?')[0];
+    img.src = base + '?v=' + Date.now();
+  });
 });
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .then(function(reg) { console.log('APEC offline app shell registered:', reg.scope); })
+      .catch(function(err) { console.warn('APEC offline app shell registration failed:', err); });
+  });
+}
+
 </script>
 </body>
 </html>
