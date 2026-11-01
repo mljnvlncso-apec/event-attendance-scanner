@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#071128">
-  <title>APEC Gala — Live Entrance Scanner V12.3</title>
+  <title>APEC Gala — Live Entrance Scanner V12.4</title>
   <!-- Self-hosted, pinned scanner library. Upload the matching file to /vendor/. -->
   <script src="./vendor/html5-qrcode-2.3.8.min.js"></script>
   <style>
@@ -21,7 +21,7 @@
     .comp-row{display:flex;gap:7px;margin-top:8px}.comp-row input{flex:1;min-width:0}.comp-row button{width:43px;min-width:43px;margin:0;padding:8px;background:#692e33;color:#fff1eb;border-color:#a75b5e}.hint{font-size:11px;color:#b9c4d5;line-height:1.55;margin-top:9px}.foot{text-align:center;font-size:9px;color:#8b98ad;margin-top:19px;letter-spacing:2px}
     .manualFallback{margin-top:16px;border:1px solid rgba(214,173,87,.28);border-radius:11px;background:rgba(214,173,87,.055);padding:12px}.manualFallback summary{cursor:pointer;color:var(--gold2);font-size:11px;font-weight:800;letter-spacing:.7px;list-style:none}.manualFallback summary::-webkit-details-marker{display:none}.manualFallback summary:after{content:'＋';float:right;font-size:15px}.manualFallback[open] summary:after{content:'−'}
     .manualFallback select{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:13px;background:#061329;color:var(--cream);margin-top:9px}.manualSearchRow{display:flex;gap:7px;margin-top:8px;align-items:center}.manualSearchRow input{flex:1;min-width:0}.manualSearchRow button{width:auto;min-width:95px;margin:0;padding:12px 10px}.manualFallback .manualAction{margin-top:9px;padding:12px}.manualStatus{font-size:11px;color:#c7d0df;line-height:1.5;margin-top:8px;white-space:pre-line}
-    .networkState{font-size:10px;color:#c8d2e1;margin:7px auto;text-align:center}.networkState.offline{color:#ffc7bd}.draftBanner{display:none;margin-top:12px;padding:12px;border:1px solid rgba(246,223,154,.5);border-radius:9px;background:rgba(214,173,87,.12);font-size:11px;line-height:1.5;color:#ffe9b2}.offlineTools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.offlineTools button{padding:11px 8px;font-size:10px}
+    .networkState{font-size:10px;color:#c8d2e1;margin:7px auto;text-align:center}.networkState.offline{color:#ffc7bd}.bridgeState{font-size:10px;color:#a8d8b4;margin:4px auto 8px;text-align:center}.bridgeState.delayed{color:#ffce80}.bridgeState.failed{color:#ffaaa3}.draftBanner{display:none;margin-top:12px;padding:12px;border:1px solid rgba(246,223,154,.5);border-radius:9px;background:rgba(214,173,87,.12);font-size:11px;line-height:1.5;color:#ffe9b2}.offlineTools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.offlineTools button{padding:11px 8px;font-size:10px}
     @media(max-width:390px){body{padding:10px}.app{padding:16px}.offlineTools{grid-template-columns:1fr}}
   </style>
 </head>
@@ -38,6 +38,7 @@
 
   <div class="staff" id="staffLine">Connecting to the Apps Script attendance launcher…</div>
   <div class="networkState" id="networkState">Checking network status…</div>
+  <div class="bridgeState" id="bridgeState">LAUNCHER LINK · WAITING FOR AUTHENTICATION</div>
   <div class="offlineTools">
     <button type="button" class="secondary" id="downloadRosterButton" onclick="downloadOfflineRoster()">DOWNLOAD OFFLINE ROSTER</button>
     <button type="button" class="secondary" id="syncQueueButton" onclick="syncOfflineQueue()">SYNC PENDING CHECK-INS</button>
@@ -109,6 +110,10 @@ let activePendingQueueId = '';
 let offlineRosterCount = 0;
 let offlineRosterGeneratedAt = '';
 let offlineStoragePersistent = null;
+let bridgePingTimer = null;
+let bridgePingWatchdog = null;
+let bridgePingPendingId = '';
+let bridgeLastLatencyMs = null;
 const completedQrCodes = new Set();
 const qrCooldownUntil = new Map();
 const PENDING_DRAFT_KEY = 'APEC_GALA_PENDING_GROUP_V12';
@@ -188,8 +193,61 @@ function notifyLauncherReady_() {
 
 function postToLauncher(message) {
   if (!window.opener || window.opener.closed || !expectedLauncherOrigin) return false;
-  try { window.opener.postMessage(message, expectedLauncherOrigin); return true; }
+  const outgoing = Object.assign({}, message || {}, { bridgeSentAt: Date.now() });
+  try { window.opener.postMessage(outgoing, expectedLauncherOrigin); return true; }
   catch (err) { console.warn('Launcher postMessage failed:', err); return false; }
+}
+
+function setBridgeState_(state, detail) {
+  const el = document.getElementById('bridgeState');
+  if (!el) return;
+  el.className = 'bridgeState' + (state === 'delayed' ? ' delayed' : state === 'failed' ? ' failed' : '');
+  el.textContent = detail || 'LAUNCHER LINK · ' + String(state || 'unknown').toUpperCase();
+}
+
+function sendBridgePing_() {
+  if (!authenticated || !expectedLauncherOrigin || bridgePingPendingId) return;
+  const pingId = makeId();
+  bridgePingPendingId = pingId;
+  const sentAt = Date.now();
+  setBridgeState_('ok', bridgeLastLatencyMs === null ? 'LAUNCHER LINK · CHECKING' : 'LAUNCHER LINK · ' + bridgeLastLatencyMs + ' ms');
+  if (!postToLauncher({ type: 'EVENT_BRIDGE_PING', pingId: pingId, scannerSentAt: sentAt })) {
+    bridgePingPendingId = '';
+    setBridgeState_('failed', 'LAUNCHER LINK · MESSAGE SEND FAILED');
+    return;
+  }
+  if (bridgePingWatchdog) clearTimeout(bridgePingWatchdog);
+  bridgePingWatchdog = setTimeout(function() {
+    if (bridgePingPendingId !== pingId) return;
+    bridgePingPendingId = '';
+    bridgePingWatchdog = null;
+    setBridgeState_('delayed', 'LAUNCHER RESPONSE DELAYED · SAVED CHECK-IN QUEUE REMAINS AVAILABLE');
+  }, 5000);
+}
+
+function startBridgeHeartbeat_() {
+  if (bridgePingTimer) clearInterval(bridgePingTimer);
+  if (bridgePingWatchdog) clearTimeout(bridgePingWatchdog);
+  bridgePingTimer = null;
+  bridgePingWatchdog = null;
+  bridgePingPendingId = '';
+  sendBridgePing_();
+  bridgePingTimer = setInterval(sendBridgePing_, 10000);
+}
+
+function bridgeTimingText_(response) {
+  const m = response && response.bridgeMetrics || {};
+  const parts = [];
+  if (Number.isFinite(Number(m.scannerToLauncherMs))) parts.push('scanner→launcher ' + Math.round(Number(m.scannerToLauncherMs)) + ' ms');
+  if (Number.isFinite(Number(response && response.serverMs))) parts.push('server ' + Math.round(Number(response.serverMs)) + ' ms');
+  if (Number.isFinite(Number(m.launcherElapsedMs))) parts.push('bridge ' + Math.round(Number(m.launcherElapsedMs)) + ' ms');
+  if (Number.isFinite(Number(response && response.lockWaitMs))) parts.push('lock ' + Math.round(Number(response.lockWaitMs)) + ' ms');
+  if (Number.isFinite(Number(response && response.registrationLookupMs))) parts.push('registration ' + Math.round(Number(response.registrationLookupMs)) + ' ms');
+  if (Number.isFinite(Number(response && response.attendanceLookupMs))) parts.push('attendance ' + Math.round(Number(response.attendanceLookupMs)) + ' ms');
+  if (Number.isFinite(Number(response && response.sheetWriteMs))) parts.push('write ' + Math.round(Number(response.sheetWriteMs)) + ' ms');
+  if (m.launcherVisibilityAtDispatch) parts.push('launcher ' + m.launcherVisibilityAtDispatch);
+  if (Number(m.attempts || response && response.attempts) > 1) parts.push((m.attempts || response.attempts) + ' attempts');
+  return parts.length ? '\nTiming: ' + parts.join(' · ') : '';
 }
 
 function handshake() {
@@ -628,6 +686,7 @@ window.addEventListener('message', function(event) {
     authenticated = true;
     if (handshakeTimer) { clearInterval(handshakeTimer); handshakeTimer = null; }
     document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Secure launcher connection';
+    startBridgeHeartbeat_();
     const button = document.getElementById('scanButton');
     updateNetworkState();
     restorePendingDraft();
@@ -646,6 +705,15 @@ window.addEventListener('message', function(event) {
   // After authentication, every operational message must match the exact
   // launcher origin learned from the authenticated handshake.
   if (!expectedLauncherOrigin || event.origin !== expectedLauncherOrigin) return;
+
+  if (data.type === 'EVENT_BRIDGE_PONG' && data.pingId === bridgePingPendingId) {
+    if (bridgePingWatchdog) clearTimeout(bridgePingWatchdog);
+    bridgePingWatchdog = null;
+    bridgePingPendingId = '';
+    bridgeLastLatencyMs = Math.max(0, Date.now() - Number(data.scannerSentAt || Date.now()));
+    setBridgeState_('ok', 'LAUNCHER LINK · ' + bridgeLastLatencyMs + ' ms · ' + String(data.launcherVisibility || 'unknown').toUpperCase());
+    return;
+  }
 
   if (data.type === 'EVENT_MANUAL_SEARCH_RESULT' && data.requestId === manualSearchRequestId) {
     if (manualSearchWatchdog) clearTimeout(manualSearchWatchdog);
@@ -689,15 +757,15 @@ window.addEventListener('message', function(event) {
       document.getElementById('companionRows').replaceChildren();
       document.getElementById('groupPanel').style.display = 'block';
       document.getElementById('scanButton').style.display = 'none';
-      setResult('success', 'CONTRACTOR VERIFIED', 'Enter all companion names who arrived with this contractor. The camera remains active but pauses reading while this group is confirmed.');
+      setResult('success', 'CONTRACTOR VERIFIED', 'Enter all companion names who arrived with this contractor. The camera remains active but pauses reading while this group is confirmed.' + bridgeTimingText_(response));
     } else if (response.status === 'ALREADY_CHECKED_IN') {
       completedQrCodes.add(activeQrText);
       const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
-      setResult('warning', 'ALREADY RECORDED · ALREADY CHECKED IN', (response.name || '') + '\n' + (response.company || '') + '\nPreviously checked in: ' + (response.timestamp || 'Yes') + names);
-      showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'This contractor already has an attendance record.');
+      setResult('warning', 'ALREADY RECORDED · ALREADY CHECKED IN', (response.name || '') + '\n' + (response.company || '') + '\nPreviously checked in: ' + (response.timestamp || 'Yes') + names + bridgeTimingText_(response));
+      showNextReady(250, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'This contractor already has an attendance record.');
     } else {
       setResult('error', response.status || 'QR NOT ACCEPTED', (response.message || 'This contractor could not be verified.') + '\nYou may scan the next contractor without reloading.');
-      showNextReady(1100, 'READY FOR NEXT CONTRACTOR', 'The camera is still active. Present the next QR code.');
+      showNextReady(250, 'READY FOR NEXT CONTRACTOR', 'The camera is still active. Present the next QR code.');
     }
     return;
   }
@@ -713,12 +781,12 @@ window.addEventListener('message', function(event) {
       const finishSuccess = queueId ? confirmQueuedAttendance_(queueId, registrationId, response.timestamp) : Promise.resolve();
       finishSuccess.then(function() {
         clearPendingDraft(); activePendingQueueId = ''; completedQrCodes.add(activeQrText);
-        const details = (response.name || '') + '\n' + (response.company || '') + '\nCompanions: ' + (response.companionCount || 0) + '\nTotal people: ' + (response.totalPeople || 1) + '\nRaffle ticket: ' + (response.raffleTicketNumber || '—') + '\nRecorded by: ' + (response.checkedInBy || '—');
+        const details = (response.name || '') + '\n' + (response.company || '') + '\nCompanions: ' + (response.companionCount || 0) + '\nTotal people: ' + (response.totalPeople || 1) + '\nRaffle ticket: ' + (response.raffleTicketNumber || '—') + '\nRecorded by: ' + (response.checkedInBy || '—') + bridgeTimingText_(response);
         document.getElementById('groupPanel').style.display = 'none'; verifiedContractor = null; activeCheckInMethod = 'QR';
         document.getElementById('manualFallback').open = false; document.getElementById('manualCandidateSelect').value = ''; document.getElementById('manualUseButton').disabled = true;
         setResult('success', 'GROUP CHECK-IN COMPLETE', details);
         updateOfflineStoreStatus_();
-        showNextReady(1000, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded and the durable local queue has been cleared.');
+        showNextReady(250, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded and the durable local queue has been cleared.');
       }).catch(function(err) {
         isProcessing = false;
         setResult('warning', 'SERVER SAVED · LOCAL QUEUE RETAINED', 'Attendance was saved on the server, but local queue cleanup failed: ' + (err.message || 'unknown storage error') + '. Retry queue sync; server duplicate protection will prevent a second row.');
@@ -733,7 +801,7 @@ window.addEventListener('message', function(event) {
           document.getElementById('groupPanel').style.display = 'none'; verifiedContractor = null; activeCheckInMethod = 'QR';
           setResult('warning', 'ALREADY RECORDED · DETAILS MATCH', (response.name || 'This contractor') + ' already has an attendance record and its companion list matches this device queue.');
           updateOfflineStoreStatus_();
-          showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance row or raffle ticket was created.');
+          showNextReady(250, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance row or raffle ticket was created.');
         }).catch(function(err) {
           isProcessing = false;
           setResult('warning', 'SERVER RECORD CONFIRMED · LOCAL CLEANUP FAILED', err.message || 'Keep this device queue and retry reconciliation.');
@@ -875,7 +943,12 @@ function handleQr(decodedText) {
     setResult('error', 'VERIFICATION RESPONSE NOT RECEIVED', 'The launcher did not return a response. Try once more or use Manual Check-in.');
     const button = document.getElementById('scanButton'); button.style.display = 'block'; button.disabled = !isCameraRunning; button.textContent = isCameraRunning ? 'CAMERA ACTIVE · READY TO RETRY' : 'START LIVE CAMERA SCANNER';
   }, 38000);
-  postToLauncher({ type: 'EVENT_GROUP_PREPARE', requestId: requestId, qrText: decodedText });
+  if (!postToLauncher({ type: 'EVENT_GROUP_PREPARE', requestId: requestId, qrText: decodedText })) {
+    if (prepareWatchdog) clearTimeout(prepareWatchdog);
+    prepareWatchdog = null; activeRequestId = ''; isProcessing = false;
+    setBridgeState_('failed', 'LAUNCHER LINK · SEND FAILED');
+    setResult('error', 'LAUNCHER CONNECTION FAILED', 'The launcher did not accept the verification request. Reopen the scanner from the Apps Script launcher.');
+  }
 }
 
 function addCompanionRow(value) {
@@ -897,6 +970,7 @@ function confirmGroup() {
   const canSubmitLive = online && authenticated && !!scannerSessionToken && !!window.opener && !window.opener.closed;
   const queued = {
     queueId: makeId(), registrationId: String(verifiedContractor.registrationId).toUpperCase(),
+    registrationRow: Number(verifiedContractor.registrationRow || 0),
     name: verifiedContractor.name, company: verifiedContractor.company,
     companionNames: names, method: activeCheckInMethod === 'MANUAL' ? 'MANUAL' : 'QR',
     queuedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
@@ -945,7 +1019,7 @@ function confirmGroup() {
       setResult('warning', 'SAVE RESPONSE NOT RECEIVED · QUEUE PRESERVED', 'The server may still finish this save. The exact companion list remains in IndexedDB. Retry reconciliation; the server Registration-ID duplicate guard prevents a second Attendance row.');
       updateOfflineStoreStatus_();
     }, 75000);
-    if (!postToLauncher({ type: 'EVENT_GROUP_COMPLETE', requestId: requestId, payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: activeCheckInMethod } })) {
+    if (!postToLauncher({ type: 'EVENT_GROUP_COMPLETE', requestId: requestId, payload: { registrationId: verifiedContractor.registrationId, registrationRow: verifiedContractor.registrationRow || 0, companionNames: names, method: activeCheckInMethod } })) {
       if (saveWatchdog) clearTimeout(saveWatchdog);
       saveWatchdog = null; isProcessing = false; document.getElementById('confirmButton').disabled = false;
       updatePendingOfflineGroup_(saved.queueId, { queueStatus: 'PENDING_SERVER_CONFIRMATION', lastServerStatus: 'BRIDGE_UNAVAILABLE' });
