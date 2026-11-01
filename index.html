@@ -29,6 +29,8 @@
     .manualFallback select{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:13px;background:#061329;color:var(--cream);margin-top:9px}
     .manualSearchRow{display:flex;gap:7px;margin-top:8px;align-items:center}.manualSearchRow input{flex:1;min-width:0}.manualSearchRow button{width:auto;min-width:95px;margin:0;padding:12px 10px}
     .manualFallback .manualAction{margin-top:9px;padding:12px}.manualStatus{font-size:11px;color:#c7d0df;line-height:1.5;margin-top:8px;white-space:pre-line}
+    .networkState{font-size:10px;color:#c8d2e1;margin:7px auto;text-align:center}.networkState.offline{color:#ffc7bd}.draftBanner{display:none;margin-top:12px;padding:12px;border:1px solid rgba(246,223,154,.5);border-radius:9px;background:rgba(214,173,87,.12);font-size:11px;line-height:1.5;color:#ffe9b2}
+    .networkState{font-size:10px;color:#c8d2e1;margin:7px auto;text-align:center}.networkState.offline{color:#ffc7bd}.draftBanner{display:none;margin-top:12px;padding:12px;border:1px solid rgba(246,223,154,.5);border-radius:9px;background:rgba(214,173,87,.12);font-size:11px;line-height:1.5;color:#ffe9b2}
   </style>
 </head>
 <body>
@@ -43,6 +45,10 @@
   </header>
 
   <div class="staff" id="staffLine">Connecting to the Apps Script attendance launcher…</div>
+  <div class="networkState" id="networkState">Checking network status…</div>
+  <div class="draftBanner" id="draftBanner">A pending group draft is saved on this device. Reconnect and retry the same group; the server will prevent duplicate attendance.</div>
+  <div class="networkState" id="networkState">Checking network status…</div>
+  <div class="draftBanner" id="draftBanner">A pending group draft is saved on this device. Reconnect and retry the same group; the server will prevent duplicate attendance.</div>
   <div id="reader"></div>
   <button id="scanButton" type="button" onclick="startScanner()" disabled>CONNECTING…</button>
 
@@ -95,7 +101,9 @@ let requestStartedAt = 0;
 let verifiedContractor = null;
 let activeCheckInMethod = 'QR';
 let manualSearchRequestId = '';
+let manualSearchBusy = false;
 let manualCandidateMap = {};
+const PENDING_DRAFT_KEY = 'APEC_GALA_PENDING_GROUP_V11';
 let handshakeTimer = null;
 let prepareWatchdog = null;
 let saveWatchdog = null;
@@ -113,6 +121,114 @@ function setResult(type, title, details) {
 }
 
 function makeId() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); }
+
+function updateNetworkState() {
+  const el = document.getElementById('networkState');
+  if (!el) return;
+  const online = navigator.onLine !== false;
+  el.textContent = online ? 'ONLINE · SERVER VALIDATION AVAILABLE' : 'OFFLINE · SCANS AND SEARCHES CANNOT BE VERIFIED';
+  el.className = online ? 'networkState' : 'networkState offline';
+}
+
+function savePendingDraft() {
+  if (!verifiedContractor) return;
+  const names = Array.from(document.querySelectorAll('#companionRows input')).map(el => el.value.trim());
+  const draft = {
+    registrationId: verifiedContractor.registrationId,
+    name: verifiedContractor.name,
+    company: verifiedContractor.company,
+    companionNames: names,
+    method: activeCheckInMethod,
+    savedAt: Date.now()
+  };
+  try {
+    sessionStorage.setItem(PENDING_DRAFT_KEY, JSON.stringify(draft));
+    document.getElementById('draftBanner').style.display = 'block';
+  } catch (e) {
+    // Continue online; a storage quota/private-mode failure must not block check-in.
+  }
+}
+
+function clearPendingDraft() {
+  try { sessionStorage.removeItem(PENDING_DRAFT_KEY); } catch (e) {}
+  const banner = document.getElementById('draftBanner');
+  if (banner) banner.style.display = 'none';
+}
+
+function restorePendingDraft() {
+  let draft = null;
+  try { draft = JSON.parse(sessionStorage.getItem(PENDING_DRAFT_KEY) || 'null'); } catch (e) {}
+  if (!draft || !draft.registrationId || !Array.isArray(draft.companionNames)) return;
+  if (Date.now() - Number(draft.savedAt || 0) > 12 * 60 * 60 * 1000) {
+    clearPendingDraft();
+    return;
+  }
+  verifiedContractor = { registrationId: draft.registrationId, name: draft.name || '', company: draft.company || '' };
+  activeCheckInMethod = draft.method === 'MANUAL' ? 'MANUAL' : 'QR';
+  activeQrText = activeCheckInMethod === 'MANUAL' ? 'MANUAL|' + draft.registrationId : 'EVENTATTENDANCE|' + draft.registrationId;
+  document.getElementById('contractorName').textContent = verifiedContractor.name;
+  document.getElementById('contractorCompany').textContent = verifiedContractor.company;
+  document.getElementById('companionRows').innerHTML = '';
+  draft.companionNames.forEach(name => addCompanionRow(name));
+  document.getElementById('groupPanel').style.display = 'block';
+  document.getElementById('scanButton').style.display = 'none';
+  document.getElementById('draftBanner').style.display = 'block';
+  setResult('warning', 'PENDING GROUP DRAFT RESTORED', 'This group was not confirmed by the server. Reconnect, verify the contractor is physically present, then confirm again. The server will prevent a duplicate if the earlier save actually completed.');
+}
+
+function updateNetworkState() {
+  const el = document.getElementById('networkState');
+  if (!el) return;
+  const online = navigator.onLine !== false;
+  el.textContent = online ? 'ONLINE · SERVER VALIDATION AVAILABLE' : 'OFFLINE · SCANS AND SEARCHES CANNOT BE VERIFIED';
+  el.className = online ? 'networkState' : 'networkState offline';
+}
+
+function savePendingDraft() {
+  if (!verifiedContractor) return;
+  const names = Array.from(document.querySelectorAll('#companionRows input')).map(el => el.value.trim());
+  const draft = {
+    registrationId: verifiedContractor.registrationId,
+    name: verifiedContractor.name,
+    company: verifiedContractor.company,
+    companionNames: names,
+    method: activeCheckInMethod,
+    savedAt: Date.now()
+  };
+  try {
+    sessionStorage.setItem(PENDING_DRAFT_KEY, JSON.stringify(draft));
+    document.getElementById('draftBanner').style.display = 'block';
+  } catch (e) {
+    // Continue online; a storage quota/private-mode failure must not block check-in.
+  }
+}
+
+function clearPendingDraft() {
+  try { sessionStorage.removeItem(PENDING_DRAFT_KEY); } catch (e) {}
+  const banner = document.getElementById('draftBanner');
+  if (banner) banner.style.display = 'none';
+}
+
+function restorePendingDraft() {
+  let draft = null;
+  try { draft = JSON.parse(sessionStorage.getItem(PENDING_DRAFT_KEY) || 'null'); } catch (e) {}
+  if (!draft || !draft.registrationId || !Array.isArray(draft.companionNames)) return;
+  if (Date.now() - Number(draft.savedAt || 0) > 12 * 60 * 60 * 1000) {
+    clearPendingDraft();
+    return;
+  }
+  verifiedContractor = { registrationId: draft.registrationId, name: draft.name || '', company: draft.company || '' };
+  activeCheckInMethod = draft.method === 'MANUAL' ? 'MANUAL' : 'QR';
+  activeQrText = activeCheckInMethod === 'MANUAL' ? 'MANUAL|' + draft.registrationId : 'EVENTATTENDANCE|' + draft.registrationId;
+  document.getElementById('contractorName').textContent = verifiedContractor.name;
+  document.getElementById('contractorCompany').textContent = verifiedContractor.company;
+  document.getElementById('companionRows').innerHTML = '';
+  draft.companionNames.forEach(name => addCompanionRow(name));
+  document.getElementById('groupPanel').style.display = 'block';
+  document.getElementById('scanButton').style.display = 'none';
+  document.getElementById('draftBanner').style.display = 'block';
+  setResult('warning', 'PENDING GROUP DRAFT RESTORED', 'This group was not confirmed by the server. Reconnect, verify the contractor is physically present, then confirm again. The server will prevent a duplicate if the earlier save actually completed.');
+}
 
 function handshake() {
   if (!window.opener || window.opener.closed) {
@@ -158,7 +274,9 @@ window.addEventListener('message', function(event) {
     document.getElementById('staffLine').textContent = scannerSessionLabel + ' · No PIN sign-in required';
     document.getElementById('scanButton').disabled = false;
     document.getElementById('scanButton').textContent = 'START LIVE CAMERA SCANNER';
-    setResult('info', 'READY TO SCAN', 'Press Start Live Camera Scanner. The camera will remain active between contractors.');
+    updateNetworkState();
+    restorePendingDraft();
+    if (!verifiedContractor) setResult('info', 'READY TO SCAN', 'Press Start Live Camera Scanner. The camera will remain active between contractors.');
     return;
   }
 
@@ -169,6 +287,8 @@ window.addEventListener('message', function(event) {
     // Clear the request id immediately so a late server response after a timeout
     // cannot overwrite a newer manual-search result.
     manualSearchRequestId = '';
+    manualSearchBusy = false;
+    document.querySelector('.manualSearchRow button').disabled = false;
     const status = document.getElementById('manualSearchStatus');
     const select = document.getElementById('manualCandidateSelect');
     const useButton = document.getElementById('manualUseButton');
@@ -217,6 +337,7 @@ window.addEventListener('message', function(event) {
       document.getElementById('scanButton').style.display = 'none';
       setResult('success', 'CONTRACTOR VERIFIED', 'Enter the names of all companions who arrived with this contractor. The camera stays on but pauses reading while this group is being confirmed.\nTotal round trip: ' + totalMs + ' ms\nApps Script server: ' + (response.serverMs || 0) + ' ms\nRegistration lookup: ' + (response.registrationLookupMs || 0) + ' ms\nAttendance lookup: ' + (response.attendanceLookupMs || 0) + ' ms\nBridge callback: ' + (response.bridgeServerMs || 0) + ' ms.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
+      clearPendingDraft();
       completedQrCodes.add(activeQrText);
       const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
       setResult('warning', 'ALREADY RECORDED · ALREADY CHECKED IN', response.name + '\n' + response.company + '\nPreviously checked in: ' + (response.timestamp || 'Yes') + names + '\n\nThe scanner is ready for the next contractor.');
@@ -235,6 +356,7 @@ window.addEventListener('message', function(event) {
     const totalMs = requestStartedAt ? Math.max(0, Math.round(performance.now() - requestStartedAt)) : 0;
     document.getElementById('confirmButton').disabled = false;
     if (response.status === 'SUCCESS') {
+      clearPendingDraft();
       completedQrCodes.add(activeQrText);
       const details = response.name + '\n' + response.company + '\nCompanions: ' + response.companionCount + '\nTotal people: ' + response.totalPeople + '\nRecorded by: ' + response.checkedInBy + '\nSave round trip: ' + totalMs + ' ms\nGoogle Sheets single-row write: ' + (response.sheetWriteMs || 0) + ' ms\nApps Script server: ' + (response.serverMs || 0) + ' ms\nBridge callback: ' + (response.bridgeServerMs || 0) + ' ms.';
       document.getElementById('groupPanel').style.display = 'none';
@@ -246,6 +368,7 @@ window.addEventListener('message', function(event) {
       setResult('success', '✅ GROUP CHECK-IN COMPLETE', details);
       showNextReady(1000, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded. The camera is still active; scan the next contractor QR.');
     } else if (response.status === 'ALREADY_CHECKED_IN') {
+      clearPendingDraft();
       completedQrCodes.add(activeQrText);
       document.getElementById('groupPanel').style.display = 'none';
       verifiedContractor = null;
@@ -254,6 +377,7 @@ window.addEventListener('message', function(event) {
       showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance record was created.');
     } else {
       isProcessing = false;
+      if (response.status === 'TIMEOUT' || response.status === 'SYSTEM_ERROR' || response.status === 'BUSY') { savePendingDraft(); }
       if (response.status === 'TIMEOUT') activeRequestId = '';
       setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details and retry confirmation. If the previous save completed late, the server will return ALREADY CHECKED IN instead of creating a duplicate. The camera remains active but will not read another QR while this contractor is open.');
     }
@@ -298,6 +422,8 @@ function startScanner() {
 }
 
 function searchManualCandidates() {
+  if (manualSearchBusy) return;
+  if (navigator.onLine === false) { document.getElementById('manualSearchStatus').textContent = 'You are offline. Search cannot be verified until the connection returns.'; return; }
   if (!authenticated || !window.opener || window.opener.closed) {
     setResult('error', 'SCANNER CONNECTION REQUIRED', 'Open the scanner from the Apps Script entrance launcher.');
     return;
@@ -308,17 +434,23 @@ function searchManualCandidates() {
     document.getElementById('manualSearchInput').focus();
     return;
   }
+  manualSearchBusy = true;
+  document.querySelector('.manualSearchRow button').disabled = true;
+  manualSearchBusy = true;
+  document.querySelector('.manualSearchRow button').disabled = true;
   manualSearchRequestId = makeId();
   const requestId = manualSearchRequestId;
   if (manualSearchWatchdog) clearTimeout(manualSearchWatchdog);
   manualSearchWatchdog = setTimeout(function() {
     if (manualSearchRequestId !== requestId) return;
     manualSearchRequestId = '';
+    manualSearchBusy = false;
+    document.querySelector('.manualSearchRow button').disabled = false;
     manualSearchWatchdog = null;
     document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Search timed out — try again</option>';
     document.getElementById('manualSearchStatus').textContent = 'No response was received. The camera remains active. Check the connection and press SEARCH again.';
     document.getElementById('manualUseButton').disabled = true;
-  }, 28000);
+  }, 43000);
   document.getElementById('manualSearchStatus').textContent = 'Searching the contractor registration list…';
   document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Searching…</option>';
   document.getElementById('manualUseButton').disabled = true;
@@ -352,6 +484,7 @@ function useManualCandidate() {
 }
 
 function handleQr(decodedText) {
+  if (navigator.onLine === false) { setResult('error', 'OFFLINE', 'The QR may be decoded locally, but contractor verification requires the live attendance server. Wait for the connection to return.'); return; }
   if (isProcessing || verifiedContractor || !authenticated) return;
   const now = Date.now();
   if (completedQrCodes.has(decodedText)) return;
@@ -364,6 +497,12 @@ function handleQr(decodedText) {
   requestStartedAt = performance.now();
   // Prevent the same image from firing repeated requests while it remains in frame.
   qrCooldownUntil.set(decodedText, now + 10000);
+  if (qrCooldownUntil.size > 500) {
+    for (const [key, expires] of qrCooldownUntil) { if (expires < now) qrCooldownUntil.delete(key); if (qrCooldownUntil.size <= 350) break; }
+  }
+  if (qrCooldownUntil.size > 500) {
+    for (const [key, expires] of qrCooldownUntil) { if (expires < now) qrCooldownUntil.delete(key); if (qrCooldownUntil.size <= 350) break; }
+  }
   setResult('info', 'VERIFYING CONTRACTOR', 'Checking the registration record. The camera remains active.');
 
   if (!window.opener || window.opener.closed) {
@@ -383,7 +522,7 @@ function handleQr(decodedText) {
     button.style.display = 'block';
     button.disabled = !isCameraRunning;
     button.textContent = isCameraRunning ? 'CAMERA ACTIVE · READY TO RETRY' : 'START LIVE CAMERA SCANNER';
-  }, 24000);
+  }, 38000);
   window.opener.postMessage({ type: 'EVENT_GROUP_PREPARE', requestId: requestId, qrText: decodedText }, '*');
 }
 
@@ -398,6 +537,8 @@ function addCompanionRow(value) {
 
 function confirmGroup() {
   if (!verifiedContractor || isProcessing) return;
+  if (navigator.onLine === false) { savePendingDraft(); setResult('error', 'OFFLINE · DRAFT SAVED ON THIS DEVICE', 'The group has not been recorded. The names are saved in this scanner tab. Reconnect, then press Confirm Group Attendance again.'); return; }
+  if (navigator.onLine === false) { savePendingDraft(); setResult('error', 'OFFLINE · DRAFT SAVED ON THIS DEVICE', 'The group has not been recorded. The names are saved in this scanner tab. Reconnect, then press Confirm Group Attendance again.'); return; }
   const inputs = Array.from(document.querySelectorAll('#companionRows input'));
   const names = inputs.map(input => input.value.trim());
   if (names.some(name => !name)) {
@@ -407,6 +548,8 @@ function confirmGroup() {
   const confirmText = 'Confirm attendance for ' + verifiedContractor.name + ' and ' + names.length + ' companion(s)?\n\nLate companions cannot be added after confirmation.';
   if (!window.confirm(confirmText)) return;
 
+  savePendingDraft();
+  savePendingDraft();
   isProcessing = true;
   activeRequestId = makeId();
   requestStartedAt = performance.now();
@@ -426,7 +569,7 @@ function confirmGroup() {
     isProcessing = false;
     document.getElementById('confirmButton').disabled = false;
     setResult('error', 'SAVE RESPONSE NOT RECEIVED', 'The server did not return a confirmation. Do not assume the save failed; it may still finish. Wait briefly, then retry the same contractor. Duplicate protection should return ALREADY CHECKED IN if the first save completed.');
-  }, 45000);
+  }, 70000);
   window.opener.postMessage({
     type: 'EVENT_GROUP_COMPLETE',
     requestId: requestId,
@@ -460,6 +603,12 @@ function explainCameraError(error) {
   return message;
 }
 
+window.addEventListener('online', function(){ updateNetworkState(); if (verifiedContractor) setResult('warning','CONNECTION RESTORED','Your group draft is still available. Verify the contractor is present and press Confirm Group Attendance to retry.'); });
+window.addEventListener('offline', updateNetworkState);
+updateNetworkState();
+window.addEventListener('online', function(){ updateNetworkState(); if (verifiedContractor) setResult('warning','CONNECTION RESTORED','Your group draft is still available. Verify the contractor is present and press Confirm Group Attendance to retry.'); });
+window.addEventListener('offline', updateNetworkState);
+updateNetworkState();
 document.querySelectorAll('img[src*="event-poster.jpg"]').forEach(function(img){ const base=img.src.split('?')[0]; img.src=base+'?v='+Date.now(); });
 </script>
 </body>
