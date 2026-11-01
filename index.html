@@ -146,16 +146,33 @@ function allowedLauncherOrigin_(value) {
 }
 
 function checkUrlHashAuth() {
+  // The fragment carries only a version marker, never a session token or a
+  // claimed launcher origin. The actual launcher origin is learned from the
+  // authenticated postMessage handshake below.
   const params = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-  expectedLauncherOrigin = allowedLauncherOrigin_(params.get('launcherOrigin') || '');
+  const bridgeVersion = params.get('bridgeVersion');
   try { history.replaceState(null, document.title, window.location.pathname + window.location.search); } catch (err) {}
   authenticated = false;
   scannerSessionToken = '';
-  if (!expectedLauncherOrigin) {
-    setResult('error', 'INVALID LAUNCHER ORIGIN', 'Open the scanner through the Apps Script entrance launcher.');
+  expectedLauncherOrigin = '';
+  if (bridgeVersion !== '12') {
+    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
     return false;
   }
   return true;
+}
+
+function notifyLauncherReady_() {
+  if (!window.opener || window.opener.closed) return false;
+  try {
+    // This initial message contains no secrets. The launcher validates both
+    // event.source (the exact popup it opened) and the GitHub Pages origin.
+    window.opener.postMessage({ type: 'EVENT_SCANNER_READY' }, '*');
+    return true;
+  } catch (err) {
+    console.warn('Launcher READY message failed:', err);
+    return false;
+  }
 }
 
 function postToLauncher(message) {
@@ -171,7 +188,7 @@ function handshake() {
     setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
     return;
   }
-  postToLauncher({ type: 'EVENT_SCANNER_READY' });
+  notifyLauncherReady_();
   if (handshakeTimer) clearInterval(handshakeTimer);
   handshakeTimer = setInterval(function() {
     if (authenticated) { clearInterval(handshakeTimer); handshakeTimer = null; return; }
@@ -180,7 +197,7 @@ function handshake() {
       setResult('error', 'LAUNCHER DISCONNECTED', 'Return to the Apps Script launcher and open a new scanner session.');
       return;
     }
-    postToLauncher({ type: 'EVENT_SCANNER_READY' });
+    notifyLauncherReady_();
   }, 1000);
 }
 
@@ -438,14 +455,18 @@ function restorePendingDraft() {
 
 // Handle all bridge messages in one listener. Both popup identity and exact origin are required.
 window.addEventListener('message', function(event) {
-  if (!window.opener || event.source !== window.opener || !expectedLauncherOrigin || event.origin !== expectedLauncherOrigin) return;
+  if (!window.opener || event.source !== window.opener) return;
   const data = event.data;
   if (!data || typeof data !== 'object') return;
 
   if (data.type === 'EVENT_SCANNER_AUTH') {
-    if (data.authenticated !== true) return;
+    // Accept the session token only from an approved Apps Script origin and
+    // from the exact opener window that launched this scanner.
+    const verifiedOrigin = allowedLauncherOrigin_(event.origin);
+    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) return;
     const receivedToken = String(data.scannerToken || '');
     if (!receivedToken.startsWith('EA1.')) return;
+    expectedLauncherOrigin = verifiedOrigin;
     scannerSessionToken = receivedToken;
     scannerStaffName = String(data.staffName || 'Entrance Staff');
     scannerSessionLabel = String(data.sessionLabel || ('Entrance staff: ' + scannerStaffName));
@@ -460,6 +481,10 @@ window.addEventListener('message', function(event) {
     if (!verifiedContractor) setResult('info', 'READY TO SCAN', 'Connected for ' + scannerStaffName + '. Press Start Live Camera Scanner.');
     return;
   }
+
+  // After authentication, every operational message must match the exact
+  // launcher origin learned from the authenticated handshake.
+  if (!expectedLauncherOrigin || event.origin !== expectedLauncherOrigin) return;
 
   if (data.type === 'EVENT_MANUAL_SEARCH_RESULT' && data.requestId === manualSearchRequestId) {
     if (manualSearchWatchdog) clearTimeout(manualSearchWatchdog);
