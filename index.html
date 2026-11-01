@@ -45,6 +45,11 @@
 
   <div class="staff" id="staffLine">Connecting to the Apps Script attendance launcher…</div>
   <div class="networkState" id="networkState">Checking network status…</div>
+  <div class="offlineTools" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0">
+  <button type="button" class="secondary" id="downloadRosterButton" onclick="downloadOfflineRoster()">DOWNLOAD OFFLINE ROSTER</button>
+  <button type="button" class="secondary" id="syncQueueButton" onclick="syncOfflineQueue()">SYNC PENDING CHECK-INS</button>
+</div>
+<div class="manualStatus" id="offlineStoreStatus">No offline roster has been saved on this device yet.</div>
   <div class="draftBanner" id="draftBanner">A pending group draft is saved on this device. Reconnect and retry the same group; the server will prevent duplicate attendance.</div>
   <div id="reader"></div>
   <button id="scanButton" type="button" onclick="startScanner()" disabled>CONNECTING…</button>
@@ -206,13 +211,22 @@ function showNextReady(delay, title, details) {
 }
 
 window.addEventListener('message', function(event) {
-  if (event.source !== window.opener) return;
+  if (event.source !== window.opener || !expectedLauncherOrigin || event.origin !== expectedLauncherOrigin) return;
   const data = event.data || {};
 
   if (data.type === 'EVENT_SCANNER_AUTH') {
-    if (data.authenticated !== true) return;
-    authenticated = true;
-    scannerSessionLabel = String(data.sessionLabel || 'Entrance Scanner connected');
+  if (data.authenticated !== true) return;
+
+  const receivedToken = String(data.scannerToken || '');
+  if (!receivedToken.startsWith('EA1.')) return;
+
+  scannerSessionToken = receivedToken;
+  scannerStaffName = String(data.staffName || 'Entrance Staff');
+  authenticated = true;
+
+  scannerSessionLabel = String(
+  data.sessionLabel || ('Entrance staff: ' + scannerStaffName)
+  );
     if (handshakeTimer) clearInterval(handshakeTimer);
     document.getElementById('staffLine').textContent = scannerSessionLabel + ' · No PIN sign-in required';
     document.getElementById('scanButton').disabled = false;
@@ -544,6 +558,456 @@ window.addEventListener('online', function(){ updateNetworkState(); if (verified
 window.addEventListener('offline', updateNetworkState);
 updateNetworkState();
 document.querySelectorAll('img[src*="event-poster.jpg"]').forEach(function(img){ const base=img.src.split('?')[0]; img.src=base+'?v='+Date.now(); });
+
+/*
+ * V12 additions/replacements for the existing GitHub Pages index.html.
+ * Paste this block at the VERY END of its existing inline <script>, just
+ * before </script>. Then apply the small two-line bridge/message edits in the
+ * V12_Frontend_Patch_Guide.txt.
+ */
+let scannerSessionToken = '';
+let scannerStaffName = 'Entrance Staff';
+let expectedLauncherOrigin = '';
+let offlineRosterCount = 0;
+let offlineRosterGeneratedAt = '';
+let pendingRosterRequestId = '';
+let pendingOfflineSyncRequestId = '';
+const OFFLINE_DB_NAME = 'APEC_GALA_ATTENDANCE_V12';
+const OFFLINE_DB_VERSION = 1;
+
+function allowedLauncherOrigin_(value) {
+  try {
+    const u = new URL(value);
+    const host = u.hostname.toLowerCase();
+    const allowedHost = host === 'script.google.com' || host === 'script.googleusercontent.com' || host.endsWith('.script.googleusercontent.com');
+    return u.protocol === 'https:' && allowedHost && !u.username && !u.password && !u.port ? u.origin : '';
+  } catch (e) { return ''; }
+}
+
+function checkUrlHashAuth() {
+  const params = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+  expectedLauncherOrigin = allowedLauncherOrigin_(params.get('launcherOrigin') || '');
+  // Remove launch metadata from the address bar. Session token is never in the URL.
+  try { history.replaceState(null, document.title, window.location.pathname + window.location.search); } catch (e) {}
+  authenticated = false;
+  scannerSessionToken = '';
+  if (!expectedLauncherOrigin) {
+    setResult('error', 'INVALID LAUNCHER ORIGIN', 'Open the scanner through the Apps Script entrance launcher.');
+    return false;
+  }
+  return true;
+}
+
+function postToLauncher(message) {
+  if (!window.opener || window.opener.closed || !expectedLauncherOrigin) return false;
+  try { window.opener.postMessage(message, expectedLauncherOrigin); return true; }
+  catch (err) { console.warn('Launcher postMessage failed:', err); return false; }
+}
+
+function handshake() {
+  if (!checkUrlHashAuth()) return;
+  if (!window.opener || window.opener.closed) {
+    document.getElementById('staffLine').textContent = 'No Apps Script launcher connection';
+    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
+    return;
+  }
+  postToLauncher({ type: 'EVENT_SCANNER_READY' });
+  if (handshakeTimer) clearInterval(handshakeTimer);
+  handshakeTimer = setInterval(function() {
+    if (authenticated) { clearInterval(handshakeTimer); return; }
+    if (!window.opener || window.opener.closed) {
+      clearInterval(handshakeTimer);
+      setResult('error', 'LAUNCHER DISCONNECTED', 'Return to the Apps Script launcher and open a new scanner session.');
+      return;
+    }
+    postToLauncher({ type: 'EVENT_SCANNER_READY' });
+  }, 1000);
+}
+
+function openOfflineDb_() {
+  return new Promise(function(resolve, reject) {
+    if (!('indexedDB' in window)) { reject(new Error('This browser does not support IndexedDB offline storage.')); return; }
+    const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+    request.onupgradeneeded = function() {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('roster')) db.createObjectStore('roster', { keyPath: 'registrationId' });
+      if (!db.objectStoreNames.contains('pending')) db.createObjectStore('pending', { keyPath: 'queueId' });
+    };
+    request.onsuccess = function() { resolve(request.result); };
+    request.onerror = function() { reject(request.error || new Error('Could not open offline storage.')); };
+  });
+}
+
+function dbRequest_(storeName, mode, action) {
+  return openOfflineDb_().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
+      let req;
+      try { req = action(store); }
+      catch (err) { db.close(); reject(err); return; }
+      req.onsuccess = function() { resolve(req.result); };
+      req.onerror = function() { reject(req.error || new Error('Offline storage request failed.')); };
+      tx.oncomplete = function() { db.close(); };
+      tx.onerror = function() { db.close(); reject(tx.error || new Error('Offline storage transaction failed.')); };
+    });
+  });
+}
+
+function saveOfflineRoster_(registrations, generatedAt) {
+  return openOfflineDb_().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction('roster', 'readwrite');
+      const store = tx.objectStore('roster');
+      store.clear();
+      (registrations || []).forEach(function(row) { store.put(row); });
+      tx.oncomplete = function() {
+        db.close();
+        offlineRosterCount = (registrations || []).length;
+        offlineRosterGeneratedAt = generatedAt || new Date().toISOString();
+        updateOfflineStoreStatus_();
+        resolve(offlineRosterCount);
+      };
+      tx.onerror = function() { db.close(); reject(tx.error || new Error('Could not save offline roster.')); };
+    });
+  });
+}
+function getOfflineRosterAll_() { return dbRequest_('roster', 'readonly', store => store.getAll()); }
+function getOfflineRosterById_(id) { return dbRequest_('roster', 'readonly', store => store.get(String(id || '').toUpperCase())); }
+function addPendingOfflineGroup_(item) { return dbRequest_('pending', 'readwrite', store => store.put(item)); }
+function getPendingOfflineGroups_() { return dbRequest_('pending', 'readonly', store => store.getAll()); }
+function removePendingOfflineGroup_(queueId) { return dbRequest_('pending', 'readwrite', store => store.delete(queueId)); }
+function updateOfflineRosterCheckedIn_(registrationId) {
+  return getOfflineRosterById_(registrationId).then(function(row) {
+    if (!row) return;
+    row.checkedIn = true;
+    row.checkedInAt = new Date().toISOString();
+    return dbRequest_('roster', 'readwrite', store => store.put(row));
+  });
+}
+function updateOfflineStoreStatus_() {
+  const el = document.getElementById('offlineStoreStatus');
+  if (!el) return;
+  el.textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s)' + (offlineRosterGeneratedAt ? ' · downloaded ' + new Date(offlineRosterGeneratedAt).toLocaleString() : '') + '. Pending groups are saved on this device.';
+}
+
+function downloadOfflineRoster() {
+  if (!authenticated || !scannerSessionToken) { setResult('error', 'SCANNER NOT AUTHENTICATED', 'Reconnect through the Apps Script launcher before downloading the offline roster.'); return; }
+  if (navigator.onLine === false) { setResult('warning', 'OFFLINE', 'Connect to the internet before downloading or refreshing the offline roster.'); return; }
+  if (pendingRosterRequestId) return;
+  pendingRosterRequestId = makeId();
+  const button = document.getElementById('downloadRosterButton');
+  if (button) button.disabled = true;
+  postToLauncher({ type: 'EVENT_OFFLINE_ROSTER', requestId: pendingRosterRequestId });
+  const id = pendingRosterRequestId;
+  setTimeout(function() {
+    if (pendingRosterRequestId !== id) return;
+    pendingRosterRequestId = '';
+    if (button) button.disabled = false;
+    setResult('error', 'ROSTER REQUEST TIMED OUT', 'Try downloading the offline roster again while online.');
+  }, 100000);
+}
+
+function handleOfflineRosterResult_(data) {
+  if (!data || data.requestId !== pendingRosterRequestId) return;
+  pendingRosterRequestId = '';
+  const button = document.getElementById('downloadRosterButton');
+  if (button) button.disabled = false;
+  const response = data.response || {};
+  if (response.status !== 'SUCCESS' || !Array.isArray(response.registrations)) {
+    setResult('error', 'OFFLINE ROSTER FAILED', response.message || 'The server did not return a roster.');
+    return;
+  }
+  saveOfflineRoster_(response.registrations, response.generatedAt).then(function(count) {
+    setResult('success', 'OFFLINE ROSTER SAVED', count + ' active contractor record(s) are now stored on this device. This is a reference copy; all offline check-ins must be reconciled online before they become official.');
+  }).catch(function(err) {
+    setResult('error', 'OFFLINE STORAGE ERROR', err.message || 'Could not store the roster on this device.');
+  });
+}
+
+function handleOfflineSyncResult_(data) {
+  if (!data || data.requestId !== pendingOfflineSyncRequestId) return;
+  pendingOfflineSyncRequestId = '';
+  const button = document.getElementById('syncQueueButton');
+  if (button) button.disabled = false;
+  const response = data.response || {};
+  if (response.status !== 'SUCCESS' || !Array.isArray(response.results)) {
+    setResult('error', 'RECONCILIATION FAILED', response.message || 'The server did not reconcile the offline queue.');
+    return;
+  }
+  const completed = [];
+  const failures = [];
+  response.results.forEach(function(item) {
+    const result = item.result || {};
+    if (result.status === 'SUCCESS' || result.status === 'ALREADY_CHECKED_IN') {
+      completed.push(item);
+    } else {
+      failures.push(item);
+    }
+  });
+  Promise.all(completed.map(function(item) {
+    return removePendingOfflineGroup_(item.queueId).then(function() { return updateOfflineRosterCheckedIn_(item.registrationId); });
+  })).then(function() {
+    getPendingOfflineGroups_().then(function(remaining) {
+      setResult(failures.length ? 'warning' : 'success', failures.length ? 'RECONCILIATION PARTIALLY COMPLETE' : 'OFFLINE QUEUE SYNCED', completed.length + ' group(s) confirmed or already recorded. ' + failures.length + ' group(s) remain pending review. ' + remaining.length + ' item(s) remain in this device queue.');
+      updateOfflineStoreStatus_();
+      if (remaining.length && failures.length === 0) setTimeout(syncOfflineQueue, 800);
+    });
+  }).catch(function(err) {
+    setResult('error', 'QUEUE UPDATE ERROR', err.message || 'Server results were received, but the local queue could not be updated. Retry sync; duplicate protection is active.');
+  });
+}
+
+function syncOfflineQueue() {
+  if (pendingOfflineSyncRequestId) return;
+  if (!authenticated || !scannerSessionToken) { setResult('error', 'SCANNER NOT AUTHENTICATED', 'Reconnect through the Apps Script launcher before syncing queued check-ins.'); return; }
+  if (navigator.onLine === false) { setResult('warning', 'STILL OFFLINE', 'Pending group records remain stored on this device.'); return; }
+  getPendingOfflineGroups_().then(function(items) {
+    if (!items.length) { setResult('info', 'NO PENDING CHECK-INS', 'This device has no offline groups waiting for reconciliation.'); return; }
+    const batch = items.slice(0, 25);
+    pendingOfflineSyncRequestId = makeId();
+    const button = document.getElementById('syncQueueButton');
+    if (button) button.disabled = true;
+    setResult('info', 'RECONCILING OFFLINE GROUPS', 'Sending ' + batch.length + ' group(s) to the server. Each Registration ID will be revalidated and duplicate-checked.');
+    postToLauncher({ type: 'EVENT_OFFLINE_SYNC', requestId: pendingOfflineSyncRequestId, items: batch });
+    const id = pendingOfflineSyncRequestId;
+    setTimeout(function() {
+      if (pendingOfflineSyncRequestId !== id) return;
+      pendingOfflineSyncRequestId = '';
+      if (button) button.disabled = false;
+      setResult('warning', 'SYNC RESPONSE NOT RECEIVED', 'The server may still have processed the groups. Retry sync when ready; duplicate protection will prevent double attendance.');
+    }, 190000);
+  }).catch(function(err) { setResult('error', 'OFFLINE QUEUE ERROR', err.message || 'Could not read pending groups.'); });
+}
+
+function searchOfflineRoster(query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (q.length < 2) { document.getElementById('manualSearchStatus').textContent = 'Enter at least two characters to search.'; return; }
+  getOfflineRosterAll_().then(function(rows) {
+    const matches = rows.filter(function(r) {
+      return [r.name, r.company, r.contact, r.registrationId].some(v => String(v || '').toLowerCase().includes(q));
+    }).slice(0, 40);
+    const select = document.getElementById('manualCandidateSelect');
+    const useButton = document.getElementById('manualUseButton');
+    select.innerHTML = '';
+    manualCandidateMap = {};
+    useButton.disabled = true;
+    if (!matches.length) {
+      const option = document.createElement('option'); option.value = ''; option.textContent = 'No contractor found in offline roster'; select.appendChild(option);
+      document.getElementById('manualSearchStatus').textContent = 'No match in the saved offline roster. Download an updated roster when internet is available.';
+      return;
+    }
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Select the correct registered contractor…'; select.appendChild(placeholder);
+    matches.forEach(function(item, index) {
+      const key = 'offline_' + index;
+      manualCandidateMap[key] = item;
+      const option = document.createElement('option');
+      option.value = key;
+      option.textContent = item.name + ' — ' + item.company + ' · ID ' + String(item.registrationId).slice(-6) + (item.checkedIn ? ' · CHECKED IN IN SAVED ROSTER' : ' · OFFLINE / UNVERIFIED');
+      if (item.checkedIn) option.disabled = true;
+      select.appendChild(option);
+    });
+    select.onchange = function() { useButton.disabled = !select.value; };
+    document.getElementById('manualSearchStatus').textContent = matches.length + ' result(s) from the saved offline roster. Final validation occurs when the queue is reconciled online.';
+  }).catch(function(err) { document.getElementById('manualSearchStatus').textContent = err.message || 'Offline roster is not available on this device.'; });
+}
+
+function handleOfflineQr(decodedText) {
+  const raw = String(decodedText || '').trim();
+  const prefix = 'EVENTATTENDANCE|';
+  if (raw.toUpperCase().indexOf(prefix) !== 0) {
+    setResult('error', 'OFFLINE QR NOT SUPPORTED', 'Offline verification requires the permanent Registration ID QR. Reconnect or use a saved roster entry.');
+    return;
+  }
+  const id = raw.substring(prefix.length).trim().toUpperCase();
+  getOfflineRosterById_(id).then(function(candidate) {
+    if (!candidate) { setResult('error', 'NOT IN OFFLINE ROSTER', 'This contractor was not in the last roster downloaded to this device. Reconnect and refresh the roster.'); return; }
+    if (candidate.checkedIn) { setResult('warning', 'ALREADY CHECKED IN IN SAVED ROSTER', candidate.name + ' was already checked in when this device last downloaded its roster. Reconnect to confirm current status.'); return; }
+    if (verifiedContractor || isProcessing) return;
+    verifiedContractor = candidate;
+    activeCheckInMethod = 'QR';
+    activeQrText = raw;
+    document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Found · OFFLINE';
+    document.getElementById('contractorName').textContent = candidate.name;
+    document.getElementById('contractorCompany').textContent = candidate.company;
+    document.getElementById('companionRows').innerHTML = '';
+    document.getElementById('groupPanel').style.display = 'block';
+    document.getElementById('scanButton').style.display = 'none';
+    setResult('warning', 'OFFLINE CONTRACTOR MATCH', candidate.name + '\n' + candidate.company + '\nThis is a local roster match, not live server verification. Confirm only if the contractor is physically present. The saved group will remain provisional until synced.');
+  }).catch(function(err) { setResult('error', 'OFFLINE ROSTER ERROR', err.message || 'Could not read the offline roster.'); });
+}
+
+function searchManualCandidates() {
+  if (manualSearchBusy) return;
+  const query = document.getElementById('manualSearchInput').value.trim();
+  if (query.length < 2) {
+    document.getElementById('manualSearchStatus').textContent = 'Enter at least two characters to search.';
+    document.getElementById('manualSearchInput').focus();
+    return;
+  }
+  if (navigator.onLine === false) { searchOfflineRoster(query); return; }
+  if (!authenticated || !window.opener || window.opener.closed) {
+    setResult('error', 'SCANNER CONNECTION REQUIRED', 'Open the scanner from the Apps Script entrance launcher.');
+    return;
+  }
+  manualSearchBusy = true;
+  document.querySelector('.manualSearchRow button').disabled = true;
+  manualSearchRequestId = makeId();
+  const requestId = manualSearchRequestId;
+  if (manualSearchWatchdog) clearTimeout(manualSearchWatchdog);
+  manualSearchWatchdog = setTimeout(function() {
+    if (manualSearchRequestId !== requestId) return;
+    manualSearchRequestId = '';
+    manualSearchBusy = false;
+    document.querySelector('.manualSearchRow button').disabled = false;
+    manualSearchWatchdog = null;
+    document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Search timed out — try again</option>';
+    document.getElementById('manualSearchStatus').textContent = 'No response was received. Check the connection and press SEARCH again.';
+    document.getElementById('manualUseButton').disabled = true;
+  }, 43000);
+  document.getElementById('manualSearchStatus').textContent = 'Searching the contractor registration list…';
+  document.getElementById('manualCandidateSelect').innerHTML = '<option value="">Searching…</option>';
+  document.getElementById('manualUseButton').disabled = true;
+  postToLauncher({ type: 'EVENT_MANUAL_SEARCH', requestId: requestId, query: query });
+}
+
+function confirmGroup() {
+  if (!verifiedContractor || isProcessing) return;
+  const inputs = Array.from(document.querySelectorAll('#companionRows input'));
+  const names = inputs.map(input => input.value.trim());
+  if (names.some(name => !name)) {
+    setResult('error', 'COMPANION NAME REQUIRED', 'Complete every companion name or remove the empty row.');
+    return;
+  }
+  const confirmText = 'Confirm attendance for ' + verifiedContractor.name + ' and ' + names.length + ' companion(s)?\n\nLate companions cannot be added after confirmation.';
+  if (!window.confirm(confirmText)) return;
+
+  if (navigator.onLine === false) {
+    const queued = {
+      queueId: makeId(),
+      registrationId: verifiedContractor.registrationId,
+      name: verifiedContractor.name,
+      company: verifiedContractor.company,
+      companionNames: names,
+      method: activeCheckInMethod === 'MANUAL' ? 'MANUAL' : 'QR',
+      queuedAt: new Date().toISOString(),
+      provisional: true
+    };
+    addPendingOfflineGroup_(queued).then(function() {
+      clearPendingDraft();
+      if (activeQrText) completedQrCodes.add(activeQrText);
+      const name = verifiedContractor.name;
+      verifiedContractor = null;
+      activeCheckInMethod = 'QR';
+      activeQrText = '';
+      document.getElementById('groupPanel').style.display = 'none';
+      document.getElementById('scanButton').style.display = 'block';
+      document.getElementById('scanButton').disabled = !isCameraRunning;
+      document.getElementById('scanButton').textContent = isCameraRunning ? 'CAMERA ACTIVE · OFFLINE QUEUE' : 'START LIVE CAMERA SCANNER';
+      setResult('warning', 'OFFLINE GROUP SAVED · NOT YET OFFICIAL', name + ' and ' + names.length + ' companion(s) were saved in this device queue. Reconnect and sync before treating the attendance as confirmed.');
+      getPendingOfflineGroups_().then(items => { const el = document.getElementById('offlineStoreStatus'); if (el) el.textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s) · Pending groups: ' + items.length; });
+    }).catch(function(err) {
+      setResult('error', 'COULD NOT SAVE OFFLINE GROUP', err.message || 'Offline storage failed. Do not assume this attendance was recorded.');
+    });
+    return;
+  }
+
+  if (!authenticated || !scannerSessionToken || !window.opener || window.opener.closed) {
+    setResult('error', 'CONNECTION LOST', 'Reopen the scanner from the Apps Script launcher. The group has not been submitted.');
+    return;
+  }
+  savePendingDraft();
+  isProcessing = true;
+  activeRequestId = makeId();
+  requestStartedAt = performance.now();
+  document.getElementById('confirmButton').disabled = true;
+  setResult('info', 'SAVING GROUP ATTENDANCE', 'Saving one contractor group record with all companion names…');
+  const requestId = activeRequestId;
+  if (saveWatchdog) clearTimeout(saveWatchdog);
+  saveWatchdog = setTimeout(function() {
+    if (activeRequestId !== requestId || !isProcessing) return;
+    saveWatchdog = null;
+    isProcessing = false;
+    document.getElementById('confirmButton').disabled = false;
+    setResult('error', 'SAVE RESPONSE NOT RECEIVED', 'The server may still finish this save. Retry the same contractor; the server will return ALREADY CHECKED IN rather than create a duplicate.');
+  }, 70000);
+  postToLauncher({
+    type: 'EVENT_GROUP_COMPLETE',
+    requestId: requestId,
+    payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: activeCheckInMethod }
+  });
+}
+
+// A second, narrowly scoped listener handles offline roster and queue responses.
+window.addEventListener('message', function(event) {
+  if (event.source !== window.opener || !expectedLauncherOrigin || event.origin !== expectedLauncherOrigin) return;
+  const data = event.data || {};
+  if (data.type === 'EVENT_OFFLINE_ROSTER_RESULT') handleOfflineRosterResult_(data);
+  if (data.type === 'EVENT_OFFLINE_SYNC_RESULT') handleOfflineSyncResult_(data);
+});
+
+// When connectivity returns, keep the queue and roster; sync is an explicit button
+// action so staff can confirm that the live connection is stable before reconciling.
+window.addEventListener('online', function() {
+  updateNetworkState();
+  if (verifiedContractor) setResult('warning', 'CONNECTION RESTORED', 'Your group details are still available. Confirm online to save, or cancel and scan again.');
+  getPendingOfflineGroups_().then(function(items) {
+    const el = document.getElementById('offlineStoreStatus');
+    if (el) el.textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s) · Pending groups: ' + items.length + '. Press Sync Pending Check-ins to reconcile.';
+  }).catch(function() {});
+});
+
+// Patch helper used by the QR callback before the original online-only path.
+function handleQr(decodedText) {
+  if (navigator.onLine === false) { handleOfflineQr(decodedText); return; }
+  if (isProcessing || verifiedContractor || !authenticated) return;
+  const now = Date.now();
+  if (completedQrCodes.has(decodedText)) return;
+  const cooldown = qrCooldownUntil.get(decodedText) || 0;
+  if (now < cooldown) return;
+  isProcessing = true;
+  activeRequestId = makeId();
+  activeQrText = decodedText;
+  requestStartedAt = performance.now();
+  qrCooldownUntil.set(decodedText, now + 10000);
+  if (qrCooldownUntil.size > 500) {
+    for (const [key, expires] of qrCooldownUntil) { if (expires < now) qrCooldownUntil.delete(key); if (qrCooldownUntil.size <= 350) break; }
+  }
+  setResult('info', 'VERIFYING CONTRACTOR', 'Checking the registration record. The camera remains active.');
+  if (!window.opener || window.opener.closed || !expectedLauncherOrigin) {
+    setResult('error', 'CONNECTION LOST', 'Close this scanner and reopen it from the Apps Script launcher.');
+    isProcessing = false;
+    return;
+  }
+  const requestId = activeRequestId;
+  if (prepareWatchdog) clearTimeout(prepareWatchdog);
+  prepareWatchdog = setTimeout(function() {
+    if (activeRequestId !== requestId || !isProcessing || verifiedContractor) return;
+    prepareWatchdog = null;
+    activeRequestId = '';
+    isProcessing = false;
+    setResult('error', 'VERIFICATION RESPONSE NOT RECEIVED', 'The launcher did not return a response. Try once more or use Manual Check-in.');
+    const button = document.getElementById('scanButton');
+    button.style.display = 'block';
+    button.disabled = !isCameraRunning;
+    button.textContent = isCameraRunning ? 'CAMERA ACTIVE · READY TO RETRY' : 'START LIVE CAMERA SCANNER';
+  }, 38000);
+  postToLauncher({ type: 'EVENT_GROUP_PREPARE', requestId: requestId, qrText: decodedText });
+}
+
+// Initialize persisted offline status once the DOM exists.
+window.addEventListener('load', function() {
+  Promise.all([getOfflineRosterAll_(), getPendingOfflineGroups_()]).then(function(values) {
+    offlineRosterCount = values[0].length;
+    const items = values[1];
+    const el = document.getElementById('offlineStoreStatus');
+    if (el) el.textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s) saved on this device · Pending groups: ' + items.length;
+  }).catch(function(err) {
+    const el = document.getElementById('offlineStoreStatus');
+    if (el) el.textContent = err.message || 'Offline storage is unavailable in this browser.';
+  });
+});
+
 </script>
 </body>
 </html>
