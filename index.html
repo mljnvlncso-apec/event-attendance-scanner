@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#071128">
-  <title>APEC Gala — Live Entrance Scanner</title>
+  <title>APEC Gala — Live Entrance Scanner V12.3</title>
   <!-- Self-hosted, pinned scanner library. Upload the matching file to /vendor/. -->
   <script src="./vendor/html5-qrcode-2.3.8.min.js"></script>
   <style>
@@ -105,8 +105,10 @@ let saveWatchdog = null;
 let manualSearchWatchdog = null;
 let pendingRosterRequestId = '';
 let pendingOfflineSyncRequestId = '';
+let activePendingQueueId = '';
 let offlineRosterCount = 0;
 let offlineRosterGeneratedAt = '';
+let offlineStoragePersistent = null;
 const completedQrCodes = new Set();
 const qrCooldownUntil = new Map();
 const PENDING_DRAFT_KEY = 'APEC_GALA_PENDING_GROUP_V12';
@@ -238,20 +240,51 @@ function dbRequest_(storeName, mode, action) {
   return openOfflineDb_().then(function(db) {
     return new Promise(function(resolve, reject) {
       let settled = false;
-      const tx = db.transaction(storeName, mode);
-      const store = tx.objectStore(storeName);
+      let requestResult;
+      let requestError = null;
+      let tx;
       let req;
-      try { req = action(store); }
-      catch (err) { db.close(); reject(err); return; }
-      req.onsuccess = function() { if (!settled) { settled = true; resolve(req.result); } };
-      req.onerror = function() { if (!settled) { settled = true; reject(req.error || new Error('Offline storage request failed.')); } };
-      tx.oncomplete = function() { db.close(); };
-      tx.onerror = function() { db.close(); if (!settled) { settled = true; reject(tx.error || new Error('Offline storage transaction failed.')); } };
-      tx.onabort = function() { db.close(); if (!settled) { settled = true; reject(tx.error || new Error('Offline storage transaction was aborted.')); } };
+      function closeDb() {
+        try { db.close(); } catch (err) {}
+      }
+      function settleError(error) {
+        if (settled) return;
+        settled = true;
+        closeDb();
+        reject(error || new Error('Offline storage transaction failed.'));
+      }
+      try {
+        tx = db.transaction(storeName, mode);
+        // Resolve only on tx.oncomplete, never on the individual IDB request's success.
+        tx.oncomplete = function() {
+          if (settled) return;
+          settled = true;
+          closeDb();
+          resolve(requestResult);
+        };
+        tx.onerror = function() {
+          requestError = requestError || tx.error || new Error('Offline storage transaction failed.');
+          // IndexedDB normally follows this with onabort. Do not report success here.
+        };
+        tx.onabort = function() {
+          settleError(requestError || tx.error || new Error('Offline storage transaction was aborted.'));
+        };
+        req = action(tx.objectStore(storeName));
+        if (!req || typeof req !== 'object') {
+          throw new Error('Offline storage action did not return an IndexedDB request.');
+        }
+        req.onsuccess = function() { requestResult = req.result; };
+        req.onerror = function() {
+          requestError = req.error || new Error('Offline storage request failed.');
+          // Allow the transaction's abort event to settle the promise.
+        };
+      } catch (err) {
+        try { if (tx) tx.abort(); } catch (abortErr) {}
+        settleError(err);
+      }
     });
   });
 }
-
 function saveOfflineRoster_(registrations, generatedAt) {
   return openOfflineDb_().then(function(db) {
     return new Promise(function(resolve, reject) {
@@ -279,6 +312,65 @@ function getOfflineRosterById_(id) { return dbRequest_('roster', 'readonly', sto
 function addPendingOfflineGroup_(item) { return dbRequest_('pending', 'readwrite', store => store.put(item)); }
 function getPendingOfflineGroups_() { return dbRequest_('pending', 'readonly', store => store.getAll()); }
 function removePendingOfflineGroup_(queueId) { return dbRequest_('pending', 'readwrite', store => store.delete(queueId)); }
+function normalizeCompanionNamesForComparison_(names) {
+  return (Array.isArray(names) ? names : []).map(function(value) {
+    return String(value == null ? '' : value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  }).filter(Boolean).sort();
+}
+function companionListsMatch_(expected, actual) {
+  if (!Array.isArray(expected) || !Array.isArray(actual)) return false;
+  const a = normalizeCompanionNamesForComparison_(expected);
+  const b = normalizeCompanionNamesForComparison_(actual);
+  return a.length === b.length && a.every(function(value, index) { return value === b[index]; });
+}
+function updatePendingOfflineGroup_(queueId, patch) {
+  return getPendingOfflineGroups_().then(function(items) {
+    const existing = items.find(function(item) { return item.queueId === queueId; });
+    if (!existing) return null;
+    Object.assign(existing, patch || {});
+    existing.updatedAt = new Date().toISOString();
+    return addPendingOfflineGroup_(existing).then(function() { return existing; });
+  });
+}
+function saveQueuedGroup_(candidate) {
+  return getPendingOfflineGroups_().then(function(items) {
+    const registrationId = String(candidate.registrationId || '').toUpperCase();
+    const existing = items.find(function(item) { return String(item.registrationId || '').toUpperCase() === registrationId; });
+    if (existing) {
+      if (existing.queueStatus === 'CONFLICT') {
+        throw new Error('This contractor already has an unresolved companion-list conflict. Ask the administrator to review it before retrying.');
+      }
+      if (!companionListsMatch_(existing.companionNames, candidate.companionNames)) {
+        throw new Error('A different companion list is already pending for this contractor on this device. Do not overwrite it; sync or ask the administrator to review the existing queue item.');
+      }
+      const reused = Object.assign({}, existing, candidate, {
+        queueId: existing.queueId,
+        createdAt: existing.createdAt || existing.queuedAt || candidate.queuedAt
+      });
+      return addPendingOfflineGroup_(reused).then(function() { return reused; });
+    }
+    return addPendingOfflineGroup_(candidate).then(function() { return candidate; });
+  });
+}
+function confirmQueuedAttendance_(queueId, registrationId, checkedInAt) {
+  return updateOfflineRosterState_(registrationId, {
+    checkedIn: true, pendingOffline: false, conflict: false,
+    checkedInAt: checkedInAt || new Date().toISOString()
+  }).then(function() {
+    return removePendingOfflineGroup_(queueId);
+  });
+}
+function markQueuedConflict_(queueId, registrationId, expectedNames, serverNames, note) {
+  return updatePendingOfflineGroup_(queueId, {
+    queueStatus: 'CONFLICT',
+    conflictAt: new Date().toISOString(),
+    conflictNote: note || 'Server already has a check-in with a different companion list.',
+    serverCompanionNames: Array.isArray(serverNames) ? serverNames : [],
+    expectedCompanionNames: Array.isArray(expectedNames) ? expectedNames : []
+  }).then(function() {
+    return updateOfflineRosterState_(registrationId, { pendingOffline: true, conflict: true });
+  });
+}
 function updateOfflineRosterState_(registrationId, values) {
   return getOfflineRosterById_(registrationId).then(function(row) {
     if (!row) return;
@@ -290,12 +382,31 @@ function updateOfflineStoreStatus_() {
   const el = document.getElementById('offlineStoreStatus');
   if (!el) return;
   getPendingOfflineGroups_().then(function(items) {
+    const conflicts = items.filter(function(item) { return item.queueStatus === 'CONFLICT'; }).length;
+    const storageText = offlineStoragePersistent === true ? ' · persistent storage granted' :
+      offlineStoragePersistent === false ? ' · browser storage is best-effort' : '';
     el.textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s)' +
       (offlineRosterGeneratedAt ? ' · downloaded ' + new Date(offlineRosterGeneratedAt).toLocaleString() : '') +
-      ' · Pending groups: ' + items.length + '. Offline records remain provisional until server reconciliation.';
+      ' · Pending groups: ' + items.length + ' · Conflicts: ' + conflicts + storageText +
+      '. Attendance is provisional until reconciled with the server.';
   }).catch(function() { el.textContent = 'Offline storage status unavailable.'; });
 }
-
+function requestOfflineStoragePersistence_() {
+  if (!navigator.storage || typeof navigator.storage.persist !== 'function') {
+    offlineStoragePersistent = false;
+    updateOfflineStoreStatus_();
+    return Promise.resolve(false);
+  }
+  return navigator.storage.persist().then(function(granted) {
+    offlineStoragePersistent = !!granted;
+    updateOfflineStoreStatus_();
+    return offlineStoragePersistent;
+  }).catch(function() {
+    offlineStoragePersistent = false;
+    updateOfflineStoreStatus_();
+    return false;
+  });
+}
 function downloadOfflineRoster() {
   if (!authenticated || !scannerSessionToken) { setResult('error', 'SCANNER NOT AUTHENTICATED', 'Reconnect through the Apps Script launcher before downloading the offline roster.'); return; }
   if (navigator.onLine === false) { setResult('warning', 'OFFLINE', 'Connect to the internet before downloading or refreshing the offline roster.'); return; }
@@ -335,54 +446,76 @@ function handleOfflineSyncResult_(data) {
   if (button) button.disabled = false;
   const response = data.response || {};
   if (response.status !== 'SUCCESS' || !Array.isArray(response.results)) {
-    setResult('error', 'RECONCILIATION FAILED', response.message || 'The server did not reconcile the offline queue.');
+    setResult('error', 'RECONCILIATION FAILED', response.message || 'The server did not reconcile the offline queue. Local records remain saved.');
     return;
   }
   const completed = [];
+  const conflicts = [];
   const failures = [];
   response.results.forEach(function(item) {
     const result = item.result || {};
-    if (result.status === 'SUCCESS' || result.status === 'ALREADY_CHECKED_IN') completed.push(item);
-    else failures.push(item);
+    if (result.status === 'SUCCESS') {
+      completed.push(item);
+    } else if (result.status === 'ALREADY_CHECKED_IN') {
+      const expected = Array.isArray(item.queuedCompanionNames) ? item.queuedCompanionNames : [];
+      const actual = Array.isArray(result.companions) ? result.companions : [];
+      if (companionListsMatch_(expected, actual)) completed.push(item);
+      else conflicts.push(item);
+    } else {
+      failures.push(item);
+    }
   });
-  Promise.all(completed.map(function(item) {
-    return removePendingOfflineGroup_(item.queueId).then(function() {
-      return updateOfflineRosterState_(item.registrationId, { checkedIn: true, pendingOffline: false, checkedInAt: new Date().toISOString() });
-    });
-  })).then(function() {
+  const conflictWrites = conflicts.map(function(item) {
+    return markQueuedConflict_(item.queueId, item.registrationId,
+      item.queuedCompanionNames || [], item.result && item.result.companions || [],
+      'The server already has an attendance row, but its companion names do not match this device queue. No local queue item was deleted.');
+  });
+  const completedWrites = completed.map(function(item) {
+    return confirmQueuedAttendance_(item.queueId, item.registrationId,
+      item.result && item.result.timestamp ? item.result.timestamp : new Date().toISOString());
+  });
+  Promise.all(completedWrites.concat(conflictWrites)).then(function() {
     return getPendingOfflineGroups_();
   }).then(function(remaining) {
-    setResult(failures.length ? 'warning' : 'success', failures.length ? 'RECONCILIATION PARTIALLY COMPLETE' : 'OFFLINE QUEUE SYNCED',
-      completed.length + ' group(s) confirmed or already recorded. ' + failures.length + ' group(s) remain pending review. ' + remaining.length + ' item(s) remain in this device queue.');
+    const unresolved = remaining.filter(function(item) { return item.queueStatus === 'CONFLICT'; }).length;
+    const message = completed.length + ' group(s) confirmed. ' + conflicts.length + ' companion conflict(s) retained for administrator review. ' +
+      failures.length + ' group(s) remain pending. Queue now contains ' + remaining.length + ' item(s), including ' + unresolved + ' conflict(s).';
+    setResult(conflicts.length || failures.length ? 'warning' : 'success',
+      conflicts.length || failures.length ? 'RECONCILIATION NEEDS REVIEW' : 'OFFLINE QUEUE SYNCED', message);
     updateOfflineStoreStatus_();
-    if (remaining.length && failures.length === 0) window.setTimeout(syncOfflineQueue, 800);
+    if (remaining.length && conflicts.length === 0 && failures.length === 0) window.setTimeout(syncOfflineQueue, 800);
   }).catch(function(err) {
-    setResult('error', 'QUEUE UPDATE ERROR', err.message || 'Server results were received, but the local queue could not be updated. Retry sync; duplicate protection is active.');
+    setResult('error', 'QUEUE UPDATE ERROR', (err.message || 'Could not update the local queue.') + ' Keep the device data; retry sync after checking server attendance.');
   });
 }
-
 function syncOfflineQueue() {
   if (pendingOfflineSyncRequestId) return;
   if (!authenticated || !scannerSessionToken) { setResult('error', 'SCANNER NOT AUTHENTICATED', 'Reconnect through the Apps Script launcher before syncing queued check-ins.'); return; }
-  if (navigator.onLine === false) { setResult('warning', 'STILL OFFLINE', 'Pending group records remain stored on this device.'); return; }
+  if (navigator.onLine === false) { setResult('warning', 'STILL OFFLINE', 'Pending group records remain stored in this device queue.'); return; }
   getPendingOfflineGroups_().then(function(items) {
-    if (!items.length) { setResult('info', 'NO PENDING CHECK-INS', 'This device has no offline groups waiting for reconciliation.'); return; }
-    const batch = items.slice(0, 25);
+    const conflicts = items.filter(function(item) { return item.queueStatus === 'CONFLICT'; });
+    const eligible = items.filter(function(item) { return item.queueStatus !== 'CONFLICT'; });
+    if (!eligible.length) {
+      setResult(conflicts.length ? 'warning' : 'info', conflicts.length ? 'ADMIN REVIEW REQUIRED' : 'NO PENDING CHECK-INS',
+        conflicts.length ? conflicts.length + ' unresolved companion conflict(s) were retained. Do not overwrite them; compare the server Attendance row with the device record.' : 'This device has no offline groups waiting for reconciliation.');
+      return;
+    }
+    const batch = eligible.slice(0, 10);
     pendingOfflineSyncRequestId = makeId();
     const reqId = pendingOfflineSyncRequestId;
     const button = document.getElementById('syncQueueButton');
     if (button) button.disabled = true;
-    setResult('info', 'RECONCILING OFFLINE GROUPS', 'Sending ' + batch.length + ' group(s) to the server. Each Registration ID will be revalidated and duplicate-checked.');
+    setResult('info', 'RECONCILING OFFLINE GROUPS', 'Sending ' + batch.length + ' group(s). Every Registration ID is revalidated on the server. Companion mismatches are retained for review.');
     postToLauncher({ type: 'EVENT_OFFLINE_SYNC', requestId: reqId, items: batch });
     window.setTimeout(function() {
       if (pendingOfflineSyncRequestId !== reqId) return;
       pendingOfflineSyncRequestId = '';
       if (button) button.disabled = false;
-      setResult('warning', 'SYNC RESPONSE NOT RECEIVED', 'The server may still have processed the groups. Retry sync when ready; duplicate protection will prevent double attendance.');
+      setResult('warning', 'SYNC RESPONSE NOT RECEIVED', 'The server may still have processed these groups. The IndexedDB queue was not cleared. Retry sync later; duplicate protection and companion-list comparison remain active.');
+      updateOfflineStoreStatus_();
     }, 190000);
   }).catch(function(err) { setResult('error', 'OFFLINE QUEUE ERROR', err.message || 'Could not read pending groups.'); });
 }
-
 function searchOfflineRoster(query) {
   const q = String(query || '').trim().toLowerCase();
   if (q.length < 2) { document.getElementById('manualSearchStatus').textContent = 'Enter at least two characters to search.'; return; }
@@ -574,22 +707,62 @@ window.addEventListener('message', function(event) {
     saveWatchdog = null;
     const response = data.response || {};
     document.getElementById('confirmButton').disabled = false;
+    const queueId = activePendingQueueId;
+    const registrationId = verifiedContractor && verifiedContractor.registrationId || '';
     if (response.status === 'SUCCESS') {
-      clearPendingDraft(); completedQrCodes.add(activeQrText);
-      const details = (response.name || '') + '\n' + (response.company || '') + '\nCompanions: ' + (response.companionCount || 0) + '\nTotal people: ' + (response.totalPeople || 1) + '\nRaffle ticket: ' + (response.raffleTicketNumber || '—') + '\nRecorded by: ' + (response.checkedInBy || '—');
-      document.getElementById('groupPanel').style.display = 'none'; verifiedContractor = null; activeCheckInMethod = 'QR';
-      document.getElementById('manualFallback').open = false; document.getElementById('manualCandidateSelect').value = ''; document.getElementById('manualUseButton').disabled = true;
-      setResult('success', 'GROUP CHECK-IN COMPLETE', details);
-      showNextReady(1000, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded. The camera remains active; scan the next contractor QR.');
+      const finishSuccess = queueId ? confirmQueuedAttendance_(queueId, registrationId, response.timestamp) : Promise.resolve();
+      finishSuccess.then(function() {
+        clearPendingDraft(); activePendingQueueId = ''; completedQrCodes.add(activeQrText);
+        const details = (response.name || '') + '\n' + (response.company || '') + '\nCompanions: ' + (response.companionCount || 0) + '\nTotal people: ' + (response.totalPeople || 1) + '\nRaffle ticket: ' + (response.raffleTicketNumber || '—') + '\nRecorded by: ' + (response.checkedInBy || '—');
+        document.getElementById('groupPanel').style.display = 'none'; verifiedContractor = null; activeCheckInMethod = 'QR';
+        document.getElementById('manualFallback').open = false; document.getElementById('manualCandidateSelect').value = ''; document.getElementById('manualUseButton').disabled = true;
+        setResult('success', 'GROUP CHECK-IN COMPLETE', details);
+        updateOfflineStoreStatus_();
+        showNextReady(1000, 'GROUP SAVED · READY FOR NEXT CONTRACTOR', 'Attendance is recorded and the durable local queue has been cleared.');
+      }).catch(function(err) {
+        isProcessing = false;
+        setResult('warning', 'SERVER SAVED · LOCAL QUEUE RETAINED', 'Attendance was saved on the server, but local queue cleanup failed: ' + (err.message || 'unknown storage error') + '. Retry queue sync; server duplicate protection will prevent a second row.');
+      });
     } else if (response.status === 'ALREADY_CHECKED_IN') {
-      clearPendingDraft(); completedQrCodes.add(activeQrText);
-      document.getElementById('groupPanel').style.display = 'none'; verifiedContractor = null; activeCheckInMethod = 'QR';
-      setResult('warning', 'ALREADY RECORDED', (response.name || 'This contractor') + ' already has an attendance record.');
-      showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance or raffle ticket was created.');
+      const expected = Array.from(document.querySelectorAll('#companionRows input')).map(function(el) { return el.value.trim(); });
+      const actual = Array.isArray(response.companions) ? response.companions : [];
+      if (companionListsMatch_(expected, actual)) {
+        const done = queueId ? confirmQueuedAttendance_(queueId, registrationId, response.timestamp) : Promise.resolve();
+        done.then(function() {
+          clearPendingDraft(); activePendingQueueId = ''; completedQrCodes.add(activeQrText);
+          document.getElementById('groupPanel').style.display = 'none'; verifiedContractor = null; activeCheckInMethod = 'QR';
+          setResult('warning', 'ALREADY RECORDED · DETAILS MATCH', (response.name || 'This contractor') + ' already has an attendance record and its companion list matches this device queue.');
+          updateOfflineStoreStatus_();
+          showNextReady(1000, 'ALREADY CHECKED IN · READY FOR NEXT QR', 'No second attendance row or raffle ticket was created.');
+        }).catch(function(err) {
+          isProcessing = false;
+          setResult('warning', 'SERVER RECORD CONFIRMED · LOCAL CLEANUP FAILED', err.message || 'Keep this device queue and retry reconciliation.');
+        });
+      } else {
+        isProcessing = false;
+        const conflict = queueId ? markQueuedConflict_(queueId, registrationId, expected, actual,
+          'Server already has a completed attendance row with a different companion list than the currently queued group.') : Promise.resolve();
+        conflict.then(function() {
+          const expectedText = expected.length ? expected.join(', ') : '(none)';
+          const actualText = actual.length ? actual.join(', ') : '(none)';
+          document.getElementById('confirmButton').disabled = true;
+          setResult('error', 'COMPANION LIST CONFLICT · ADMIN REVIEW REQUIRED', 'Server record companions: ' + actualText + '\nThis device companions: ' + expectedText + '\nThe local queue was retained. Do not retry or overwrite this group until an administrator compares the Attendance row.');
+          updateOfflineStoreStatus_();
+        }).catch(function(err) {
+          setResult('error', 'COMPANION CONFLICT · LOCAL REVIEW REQUIRED', 'The server has an existing check-in, but IndexedDB could not update the conflict status: ' + (err.message || 'unknown storage error') + '. Do not retry or clear this queue.');
+        });
+      }
     } else {
       isProcessing = false;
-      if (['TIMEOUT','SYSTEM_ERROR','BUSY'].includes(response.status)) savePendingDraft();
-      setResult('error', response.message || response.status || 'Group check-in failed.', 'Review the details and retry confirmation. If a previous save completed late, the server should return ALREADY CHECKED IN rather than create a duplicate.');
+      if (queueId) updatePendingOfflineGroup_(queueId, {
+        queueStatus: 'PENDING_SERVER_CONFIRMATION',
+        lastServerStatus: response.status || 'UNKNOWN',
+        lastError: response.message || '',
+        lastAttemptAt: new Date().toISOString()
+      });
+      setResult('warning', 'SERVER RESPONSE UNCERTAIN · LOCAL QUEUE PRESERVED',
+        (response.message || response.status || 'Group check-in did not return a confirmed result.') + '\nThe group remains stored in this device’s IndexedDB queue. Retry sync or review it with the administrator; do not discard the device data.');
+      updateOfflineStoreStatus_();
     }
     return;
   }
@@ -720,42 +893,77 @@ function confirmGroup() {
   if (names.some(name => !name)) { setResult('error', 'COMPANION NAME REQUIRED', 'Complete every companion name or remove the empty row.'); return; }
   if (!window.confirm('Confirm attendance for ' + verifiedContractor.name + ' and ' + names.length + ' companion(s)?\n\nLate companions cannot be added after confirmation.')) return;
 
-  if (navigator.onLine === false) {
-    const queued = {
-      queueId: makeId(), registrationId: String(verifiedContractor.registrationId).toUpperCase(),
-      name: verifiedContractor.name, company: verifiedContractor.company,
-      companionNames: names, method: activeCheckInMethod === 'MANUAL' ? 'MANUAL' : 'QR',
-      queuedAt: new Date().toISOString(), provisional: true
-    };
-    addPendingOfflineGroup_(queued).then(function() {
-      return updateOfflineRosterState_(queued.registrationId, { pendingOffline: true });
-    }).then(function() {
+  const online = navigator.onLine !== false;
+  const canSubmitLive = online && authenticated && !!scannerSessionToken && !!window.opener && !window.opener.closed;
+  const queued = {
+    queueId: makeId(), registrationId: String(verifiedContractor.registrationId).toUpperCase(),
+    name: verifiedContractor.name, company: verifiedContractor.company,
+    companionNames: names, method: activeCheckInMethod === 'MANUAL' ? 'MANUAL' : 'QR',
+    queuedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
+    queueStatus: canSubmitLive ? 'PENDING_SERVER_CONFIRMATION' : 'PENDING_OFFLINE',
+    provisional: true
+  };
+
+  if (!canSubmitLive) {
+    const button = document.getElementById('confirmButton');
+    button.disabled = true;
+    setResult('info', 'SAVING PROVISIONAL GROUP', 'Saving the group to this device before marking it as pending…');
+    saveQueuedGroup_(queued).then(function(saved) {
+      return updateOfflineRosterState_(saved.registrationId, { pendingOffline: true, conflict: false }).then(function() { return saved; });
+    }).then(function(saved) {
+      activePendingQueueId = saved.queueId;
       clearPendingDraft(); if (activeQrText) completedQrCodes.add(activeQrText);
       const name = verifiedContractor.name; verifiedContractor = null; activeCheckInMethod = 'QR'; activeQrText = '';
       document.getElementById('groupPanel').style.display = 'none';
-      const button = document.getElementById('scanButton'); button.style.display = 'block'; button.disabled = !isCameraRunning; button.textContent = isCameraRunning ? 'CAMERA ACTIVE · OFFLINE QUEUE' : 'START LIVE CAMERA SCANNER';
-      setResult('warning', 'OFFLINE GROUP SAVED · NOT YET OFFICIAL', name + ' and ' + names.length + ' companion(s) were saved in this device queue. Reconnect and sync before treating attendance as confirmed.');
+      button.disabled = false;
+      const scanButton = document.getElementById('scanButton'); scanButton.style.display = 'block'; scanButton.disabled = !isCameraRunning;
+      scanButton.textContent = isCameraRunning ? 'CAMERA ACTIVE · PROVISIONAL QUEUE' : 'START LIVE CAMERA SCANNER';
+      setResult('warning', 'GROUP SAVED · NOT YET OFFICIAL', name + ' and ' + names.length + ' companion(s) were committed to this device queue. Reconnect and sync before treating attendance as confirmed.');
       updateOfflineStoreStatus_();
-    }).catch(function(err) { setResult('error', 'COULD NOT SAVE OFFLINE GROUP', err.message || 'Offline storage failed. Do not assume this attendance was recorded.'); });
+    }).catch(function(err) {
+      button.disabled = false;
+      setResult('error', 'LOCAL QUEUE SAVE FAILED', (err.message || 'Could not save the group to IndexedDB.') + ' No server request was sent. Keep the group on screen and do not close this tab.');
+    });
     return;
   }
 
-  if (!authenticated || !scannerSessionToken || !window.opener || window.opener.closed) { setResult('error', 'CONNECTION LOST', 'Reopen the scanner from the Apps Script launcher. The group has not been submitted.'); return; }
-  savePendingDraft(); isProcessing = true; activeRequestId = makeId(); requestStartedAt = performance.now();
+  savePendingDraft();
+  isProcessing = true; activeRequestId = makeId(); requestStartedAt = performance.now();
   document.getElementById('confirmButton').disabled = true;
-  setResult('info', 'SAVING GROUP ATTENDANCE', 'Saving one contractor group record with all companion names…');
+  setResult('info', 'SECURING LOCAL RECOVERY COPY', 'The group is being committed to this device before the server check-in request is sent…');
   const requestId = activeRequestId;
-  if (saveWatchdog) clearTimeout(saveWatchdog);
-  saveWatchdog = setTimeout(function() {
-    if (activeRequestId !== requestId || !isProcessing) return;
-    saveWatchdog = null; isProcessing = false; document.getElementById('confirmButton').disabled = false;
-    setResult('error', 'SAVE RESPONSE NOT RECEIVED', 'The server may still finish this save. Retry the same contractor; duplicate protection should return ALREADY CHECKED IN rather than create another record.');
-  }, 75000);
-  postToLauncher({ type: 'EVENT_GROUP_COMPLETE', requestId: requestId, payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: activeCheckInMethod } });
+  saveQueuedGroup_(queued).then(function(saved) {
+    activePendingQueueId = saved.queueId;
+    return updateOfflineRosterState_(saved.registrationId, { pendingOffline: true, conflict: false }).then(function() { return saved; });
+  }).then(function(saved) {
+    setResult('info', 'SAVING GROUP ATTENDANCE', 'A durable local recovery copy is saved. Sending one contractor group record to the server…');
+    if (saveWatchdog) clearTimeout(saveWatchdog);
+    saveWatchdog = setTimeout(function() {
+      if (activeRequestId !== requestId || !isProcessing) return;
+      saveWatchdog = null; isProcessing = false; document.getElementById('confirmButton').disabled = false;
+      updatePendingOfflineGroup_(saved.queueId, { queueStatus: 'PENDING_SERVER_CONFIRMATION', lastServerStatus: 'CLIENT_TIMEOUT', lastAttemptAt: new Date().toISOString() });
+      setResult('warning', 'SAVE RESPONSE NOT RECEIVED · QUEUE PRESERVED', 'The server may still finish this save. The exact companion list remains in IndexedDB. Retry reconciliation; the server Registration-ID duplicate guard prevents a second Attendance row.');
+      updateOfflineStoreStatus_();
+    }, 75000);
+    if (!postToLauncher({ type: 'EVENT_GROUP_COMPLETE', requestId: requestId, payload: { registrationId: verifiedContractor.registrationId, companionNames: names, method: activeCheckInMethod } })) {
+      if (saveWatchdog) clearTimeout(saveWatchdog);
+      saveWatchdog = null; isProcessing = false; document.getElementById('confirmButton').disabled = false;
+      updatePendingOfflineGroup_(saved.queueId, { queueStatus: 'PENDING_SERVER_CONFIRMATION', lastServerStatus: 'BRIDGE_UNAVAILABLE' });
+      setResult('warning', 'LOCAL COPY SAVED · SERVER NOT REACHED', 'The group remains in IndexedDB. Reopen the scanner through the Apps Script launcher and sync the pending queue.');
+      updateOfflineStoreStatus_();
+    }
+  }).catch(function(err) {
+    isProcessing = false;
+    document.getElementById('confirmButton').disabled = false;
+    setResult('error', 'LOCAL RECOVERY SAVE FAILED', (err.message || 'Could not securely queue this group.') + ' The server request was not sent. Do not close the tab until the data has been saved.');
+  });
 }
-
 function cancelGroup() {
   if (isProcessing) return;
+  if (activePendingQueueId) {
+    setResult('warning', 'PENDING GROUP CANNOT BE DISCARDED HERE', 'This contractor group already has a durable local queue record. Reconcile it or ask the administrator to review it; cancelling the visible panel will not delete the stored record.');
+    return;
+  }
   clearPendingDraft();
   if (activeQrText) qrCooldownUntil.set(activeQrText, Date.now() + 1200);
   verifiedContractor = null; activeCheckInMethod = 'QR'; activeRequestId = ''; activeQrText = '';
@@ -809,9 +1017,10 @@ window.addEventListener('load', function() {
     document.getElementById('scanButton').disabled = true;
   }
 
+  requestOfflineStoragePersistence_();
   Promise.all([getOfflineRosterAll_(), getPendingOfflineGroups_()]).then(function(values) {
     offlineRosterCount = values[0].length;
-    document.getElementById('offlineStoreStatus').textContent = 'Offline roster: ' + offlineRosterCount + ' contractor(s) saved on this device · Pending groups: ' + values[1].length;
+    updateOfflineStoreStatus_();
   }).catch(function(err) {
     document.getElementById('offlineStoreStatus').textContent = err && err.message ? err.message : 'Offline storage is unavailable in this browser.';
   });
