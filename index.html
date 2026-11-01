@@ -140,33 +140,46 @@ function allowedLauncherOrigin_(value) {
   try {
     const u = new URL(String(value || ''));
     const host = u.hostname.toLowerCase();
-    // Apps Script may serve HtmlService from either the canonical host or a
-    // Google-managed user-content host with a generated prefix separated by
-    // a hyphen (for example, <id>-script.googleusercontent.com).
-    const allowed =
-      host === 'script.google.com' ||
-      host === 'script.googleusercontent.com' ||
-      host.endsWith('.script.googleusercontent.com') ||
-      host.endsWith('-script.googleusercontent.com');
+    const allowed = host === 'script.google.com' || host === 'script.googleusercontent.com' || host.endsWith('.script.googleusercontent.com');
     return u.protocol === 'https:' && allowed && !u.username && !u.password && !u.port ? u.origin : '';
   } catch (err) { return ''; }
 }
 
 function checkUrlHashAuth() {
-  // The fragment carries only a version marker, never a session token or a
-  // claimed launcher origin. The actual launcher origin is learned from the
-  // authenticated postMessage handshake below.
-  const params = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-  const bridgeVersion = params.get('bridgeVersion');
-  try { history.replaceState(null, document.title, window.location.pathname + window.location.search); } catch (err) {}
-  authenticated = false;
-  scannerSessionToken = '';
-  expectedLauncherOrigin = '';
-  if (bridgeVersion !== '12') {
-    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
-    return false;
+  // 1. Check existing session in sessionStorage (survives mobile refresh & orientation changes)
+  const savedToken = sessionStorage.getItem('APEC_SCANNER_TOKEN');
+  const savedStaff = sessionStorage.getItem('APEC_SCANNER_STAFF');
+  if (savedToken && savedStaff) {
+    scannerSessionToken = savedToken;
+    scannerStaffName = savedStaff;
+    scannerSessionLabel = 'Entrance staff: ' + scannerStaffName;
+    authenticated = true;
+    return true;
   }
-  return true;
+
+  // 2. Parse session from URL hash if provided by launcher
+  const rawHash = (window.location.hash || '').replace(/^#/, '');
+  const params = new URLSearchParams(rawHash);
+  const token = params.get('session');
+  const staff = params.get('staff');
+
+  if (token && token.startsWith('EA1.')) {
+    scannerSessionToken = token;
+    scannerStaffName = staff ? decodeURIComponent(staff) : 'Entrance Staff';
+    scannerSessionLabel = 'Entrance staff: ' + scannerStaffName;
+    authenticated = true;
+    sessionStorage.setItem('APEC_SCANNER_TOKEN', scannerSessionToken);
+    sessionStorage.setItem('APEC_SCANNER_STAFF', scannerStaffName);
+    return true;
+  }
+
+  // 3. Fallback: check if opened from window.opener for postMessage handshake
+  if (window.opener && !window.opener.closed) {
+    return true;
+  }
+
+  setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
+  return false;
 }
 
 function notifyLauncherReady_() {
@@ -190,26 +203,42 @@ function postToLauncher(message) {
 
 function handshake() {
   if (!checkUrlHashAuth()) return;
+
+  if (authenticated) {
+    document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Ready';
+    const button = document.getElementById('scanButton');
+    button.disabled = false;
+    button.textContent = 'START LIVE CAMERA SCANNER';
+    updateNetworkState();
+    restorePendingDraft();
+    if (!verifiedContractor) {
+      setResult('info', 'READY TO SCAN', 'Connected for ' + scannerStaffName + '. Press Start Live Camera Scanner.');
+    }
+  }
+
   if (!window.opener || window.opener.closed) {
-    document.getElementById('staffLine').textContent = 'No Apps Script launcher connection';
-    setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
+    if (!authenticated) {
+      document.getElementById('staffLine').textContent = 'No Apps Script launcher connection';
+      setResult('error', 'OPEN FROM APPS SCRIPT', 'Close this tab and open the scanner using the Apps Script entrance launcher.');
+    } else {
+      document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Ready (Launcher in background)';
+    }
     return;
   }
   notifyLauncherReady_();
   if (handshakeTimer) clearInterval(handshakeTimer);
-  let handshakeAttempts = 0;
   handshakeTimer = setInterval(function() {
-    if (authenticated) { clearInterval(handshakeTimer); handshakeTimer = null; return; }
-    if (!window.opener || window.opener.closed) {
-      clearInterval(handshakeTimer); handshakeTimer = null;
-      setResult('error', 'LAUNCHER DISCONNECTED', 'Return to the Apps Script launcher and open a new scanner session.');
+    if (authenticated && expectedLauncherOrigin) {
+      clearInterval(handshakeTimer);
+      handshakeTimer = null;
       return;
     }
-    handshakeAttempts++;
-    notifyLauncherReady_();
-    if (handshakeAttempts === 8) {
-      setResult('warning', 'LAUNCHER AUTHENTICATION PENDING', 'The scanner tab is open, but it has not received the Apps Script session yet. Keep the launcher tab open. Confirm that the latest Scanner.html deployment and this index.html version are both published.');
+    if (!window.opener || window.opener.closed) {
+      clearInterval(handshakeTimer);
+      handshakeTimer = null;
+      return;
     }
+    notifyLauncherReady_();
   }, 1000);
 }
 
@@ -475,10 +504,7 @@ window.addEventListener('message', function(event) {
     // Accept the session token only from an approved Apps Script origin and
     // from the exact opener window that launched this scanner.
     const verifiedOrigin = allowedLauncherOrigin_(event.origin);
-    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) {
-      console.warn('Rejected scanner AUTH message from an unapproved launcher origin:', event.origin);
-      return;
-    }
+    if (!verifiedOrigin || verifiedOrigin !== event.origin || data.authenticated !== true) return;
     const receivedToken = String(data.scannerToken || '');
     if (!receivedToken.startsWith('EA1.')) return;
     expectedLauncherOrigin = verifiedOrigin;
@@ -486,6 +512,8 @@ window.addEventListener('message', function(event) {
     scannerStaffName = String(data.staffName || 'Entrance Staff');
     scannerSessionLabel = String(data.sessionLabel || ('Entrance staff: ' + scannerStaffName));
     authenticated = true;
+    sessionStorage.setItem('APEC_SCANNER_TOKEN', scannerSessionToken);
+    sessionStorage.setItem('APEC_SCANNER_STAFF', scannerStaffName);
     if (handshakeTimer) { clearInterval(handshakeTimer); handshakeTimer = null; }
     document.getElementById('staffLine').textContent = scannerSessionLabel + ' · Secure launcher connection';
     const button = document.getElementById('scanButton');
