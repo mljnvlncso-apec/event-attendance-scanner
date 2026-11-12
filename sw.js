@@ -1,5 +1,5 @@
-/* APEC Gala Attendance — V12.3 hardened app-shell cache. */
-const CACHE_NAME = 'apec-gala-attendance-v12-4';
+/* APEC Gala Attendance — V13 invitation and registration sync. */
+const CACHE_NAME = 'apec-gala-attendance-v13-invitation';
 const REQUIRED_ASSETS = [
   './',
   './index.html',

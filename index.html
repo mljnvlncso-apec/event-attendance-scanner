@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#071128">
-  <title>APEC Gala — Live Entrance Scanner V12.4</title>
+  <title>APEC Gala — Live Entrance Scanner V13 Invitation & Gate Pass</title>
   <!-- Self-hosted, pinned scanner library. Upload the matching file to /vendor/. -->
   <script src="./vendor/html5-qrcode-2.3.8.min.js"></script>
   <style>
@@ -16,7 +16,7 @@
     #reader{width:100%;overflow:hidden;border-radius:12px;background:#030711;min-height:80px;margin-top:15px;border:1px solid rgba(214,173,87,.3)}#reader video{object-fit:cover}
     button{border:1px solid #f2d58c;border-radius:10px;padding:14px 15px;font-size:12px;letter-spacing:.7px;font-weight:800;cursor:pointer;width:100%;margin-top:12px;background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.secondary{background:transparent;color:var(--gold2);border-color:rgba(214,173,87,.45)}button.blue{background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.danger{background:#692e33;color:#fff1eb;border-color:#a75b5e}button:disabled{opacity:.55;cursor:not-allowed}
     #result{margin-top:15px;border-radius:11px;padding:15px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);min-height:80px;display:flex;flex-direction:column;justify-content:center;gap:6px;white-space:pre-line;overflow-wrap:anywhere;color:#e3e8f0}.title{font-family:Georgia,serif;font-size:18px;font-weight:400;color:var(--gold2)}.detail{font-size:12px;line-height:1.55}.success{background:rgba(55,112,77,.22)!important;color:#e0f7e6}.warning{background:rgba(157,111,37,.22)!important;color:#ffedbd}.error{background:rgba(150,44,40,.22)!important;color:#ffe2dd}.info{background:rgba(40,83,140,.25)!important;color:#dceaff}
-    #groupPanel{display:none;margin-top:17px;padding:15px;border:1px solid var(--line);border-radius:12px;background:rgba(2,10,27,.46)}.person{background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.18);border-radius:9px;padding:12px;margin-top:8px;text-align:left}.person strong{display:block;font-family:Georgia,serif;font-size:16px;color:var(--gold2)}.person span{font-size:11px;color:#c5cfdd}
+    #groupPanel{display:none;margin-top:17px;padding:15px;border:1px solid var(--line);border-radius:12px;background:rgba(2,10,27,.46)}.person{background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.18);border-radius:9px;padding:12px;margin-top:8px;text-align:left}.person strong{display:block;font-family:Georgia,serif;font-size:16px;color:var(--gold2)}.person span{font-size:11px;color:#c5cfdd}.group-meta{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px}.group-meta div{padding:8px;border:1px solid rgba(214,173,87,.2);border-radius:8px;background:rgba(214,173,87,.06);font-size:10px;line-height:1.45;color:#e8dfcd}.group-meta b{display:block;color:var(--gold2);font-size:9px;letter-spacing:.7px;text-transform:uppercase;margin-bottom:3px}.group-alerts{display:none;margin-top:9px;padding:10px;border:1px solid rgba(239,183,174,.55);border-radius:9px;background:rgba(150,44,40,.18);font-size:11px;line-height:1.5;color:#ffe2dd}.group-alerts strong{display:block;color:#ffd1c8;margin-bottom:4px}
     label{display:block;font-weight:700;font-size:10px;margin:15px 0 6px;text-transform:uppercase;color:var(--gold2);letter-spacing:1px}input{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:16px;outline:none;background:#061329;color:var(--cream)}input::placeholder{color:#8290a7}input:focus{border-color:var(--gold2)}
     .comp-row{display:flex;gap:7px;margin-top:8px}.comp-row input{flex:1;min-width:0}.comp-row button{width:43px;min-width:43px;margin:0;padding:8px;background:#692e33;color:#fff1eb;border-color:#a75b5e}.hint{font-size:11px;color:#b9c4d5;line-height:1.55;margin-top:9px}.foot{text-align:center;font-size:9px;color:#8b98ad;margin-top:19px;letter-spacing:2px}
     .manualFallback{margin-top:16px;border:1px solid rgba(214,173,87,.28);border-radius:11px;background:rgba(214,173,87,.055);padding:12px}.manualFallback summary{cursor:pointer;color:var(--gold2);font-size:11px;font-weight:800;letter-spacing:.7px;list-style:none}.manualFallback summary::-webkit-details-marker{display:none}.manualFallback summary:after{content:'＋';float:right;font-size:15px}.manualFallback[open] summary:after{content:'−'}
@@ -65,8 +65,10 @@
   <section id="groupPanel">
     <div class="title">Contractor Verified</div>
     <div class="person"><strong id="contractorName"></strong><span id="contractorCompany"></span></div>
-    <label>Companion names</label>
-    <div class="muted">Add the full name of every companion who arrived together with this contractor. Leave the list empty if there are no companions. There is no configured companion limit.</div>
+    <div class="group-meta" id="groupMeta"></div>
+    <div class="group-alerts" id="groupSafetyAlerts"></div>
+    <label>Companion names · pre-registered list</label>
+    <div class="muted" id="companionInstruction">Pre-registered companion names will appear below. Verify that each listed person is physically present; edit or replace a name when necessary. Do not exceed the reserved seat allocation.</div>
     <div id="companionRows"></div>
     <button class="secondary" type="button" onclick="addCompanionRow()">＋ ADD COMPANION</button>
     <div class="hint">Important: Group check-in is final after confirmation. Late companions cannot be added. Check that every name is correct before saving.</div>
@@ -593,6 +595,7 @@ function searchOfflineRoster(query) {
     }
     const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Select the correct registered contractor…'; select.appendChild(placeholder);
     matches.forEach(function(item, index) {
+      item.offlineMode = true;
       const key = 'offline_' + index;
       manualCandidateMap[key] = item;
       const option = document.createElement('option');
@@ -616,20 +619,16 @@ function handleOfflineQr(decodedText) {
   const id = raw.substring(prefix.length).trim().toUpperCase();
   getOfflineRosterById_(id).then(function(candidate) {
     if (!candidate) { setResult('error', 'NOT IN OFFLINE ROSTER', 'This contractor was not in the last roster downloaded to this device. Reconnect and refresh the roster.'); return; }
+    candidate.offlineMode = true;
     if (candidate.checkedIn || candidate.pendingOffline) {
       setResult('warning', candidate.checkedIn ? 'ALREADY CHECKED IN IN SAVED ROSTER' : 'ALREADY QUEUED ON THIS DEVICE', candidate.name + ' is already marked in this device roster. Reconnect to confirm current server status.');
       return;
     }
     if (verifiedContractor || isProcessing) return;
-    verifiedContractor = candidate;
     activeCheckInMethod = 'QR';
     activeQrText = raw;
     document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Found · OFFLINE';
-    document.getElementById('contractorName').textContent = candidate.name;
-    document.getElementById('contractorCompany').textContent = candidate.company;
-    document.getElementById('companionRows').replaceChildren();
-    document.getElementById('groupPanel').style.display = 'block';
-    document.getElementById('scanButton').style.display = 'none';
+    populateVerifiedGroup_(candidate);
     setResult('warning', 'OFFLINE CONTRACTOR MATCH', candidate.name + '\n' + candidate.company + '\nThis is a local roster match, not live server verification. Confirm only if the contractor is physically present. The group will remain provisional until synced.');
   }).catch(function(err) { setResult('error', 'OFFLINE ROSTER ERROR', err.message || 'Could not read the offline roster.'); });
 }
@@ -637,7 +636,7 @@ function handleOfflineQr(decodedText) {
 function savePendingDraft() {
   if (!verifiedContractor) return;
   const names = Array.from(document.querySelectorAll('#companionRows input')).map(el => el.value.trim());
-  const draft = { registrationId: verifiedContractor.registrationId, name: verifiedContractor.name, company: verifiedContractor.company, companionNames: names, method: activeCheckInMethod, savedAt: Date.now() };
+  const draft = { registrationId: verifiedContractor.registrationId, registrationRow: verifiedContractor.registrationRow || 0, name: verifiedContractor.name, company: verifiedContractor.company, tableNumber: verifiedContractor.tableNumber || '', reservedSeats: verifiedContractor.reservedSeats || 0, preRegisteredCompanionNames: verifiedContractor.preRegisteredCompanionNames || [], transportationMode: verifiedContractor.transportationMode || '', shuttlePickUpSite: verifiedContractor.shuttlePickUpSite || '', companionNames: names, method: activeCheckInMethod, savedAt: Date.now() };
   try { sessionStorage.setItem(PENDING_DRAFT_KEY, JSON.stringify(draft)); document.getElementById('draftBanner').style.display = 'block'; } catch (err) {}
 }
 function clearPendingDraft() {
@@ -649,11 +648,10 @@ function restorePendingDraft() {
   try { draft = JSON.parse(sessionStorage.getItem(PENDING_DRAFT_KEY) || 'null'); } catch (err) {}
   if (!draft || !draft.registrationId || !Array.isArray(draft.companionNames)) return;
   if (Date.now() - Number(draft.savedAt || 0) > 12 * 60 * 60 * 1000) { clearPendingDraft(); return; }
-  verifiedContractor = { registrationId: draft.registrationId, name: draft.name || '', company: draft.company || '' };
+  verifiedContractor = { registrationId: draft.registrationId, registrationRow: draft.registrationRow || 0, name: draft.name || '', company: draft.company || '', tableNumber: draft.tableNumber || '', reservedSeats: draft.reservedSeats || 0, preRegisteredCompanionNames: draft.preRegisteredCompanionNames || [], transportationMode: draft.transportationMode || '', shuttlePickUpSite: draft.shuttlePickUpSite || '', offlineMode: true };
   activeCheckInMethod = draft.method === 'MANUAL' ? 'MANUAL' : 'QR';
   activeQrText = activeCheckInMethod === 'MANUAL' ? 'MANUAL|' + draft.registrationId : 'EVENTATTENDANCE|' + draft.registrationId;
-  document.getElementById('contractorName').textContent = verifiedContractor.name;
-  document.getElementById('contractorCompany').textContent = verifiedContractor.company;
+  populateVerifiedGroup_(verifiedContractor);
   document.getElementById('companionRows').replaceChildren();
   draft.companionNames.forEach(name => addCompanionRow(name));
   document.getElementById('groupPanel').style.display = 'block';
@@ -750,14 +748,10 @@ window.addEventListener('message', function(event) {
     prepareWatchdog = null;
     const response = data.response || {};
     if (response.status === 'VERIFIED') {
-      verifiedContractor = response; activeCheckInMethod = 'QR'; isProcessing = false;
+      activeCheckInMethod = 'QR'; isProcessing = false;
       document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Verified';
-      document.getElementById('contractorName').textContent = response.name || '';
-      document.getElementById('contractorCompany').textContent = response.company || '';
-      document.getElementById('companionRows').replaceChildren();
-      document.getElementById('groupPanel').style.display = 'block';
-      document.getElementById('scanButton').style.display = 'none';
-      setResult('success', 'CONTRACTOR VERIFIED', 'Enter all companion names who arrived with this contractor. The camera remains active but pauses reading while this group is confirmed.' + bridgeTimingText_(response));
+      populateVerifiedGroup_(response);
+      setResult('success', 'CONTRACTOR VERIFIED', 'Check the assigned table, reserved seats and any safety / allergy alert. The pre-registered companion list is editable; confirm the people who arrived together.' + bridgeTimingText_(response));
     } else if (response.status === 'ALREADY_CHECKED_IN') {
       completedQrCodes.add(activeQrText);
       const names = Array.isArray(response.companions) && response.companions.length ? '\nCompanions: ' + response.companions.join(', ') : '';
@@ -910,16 +904,64 @@ function useManualCandidate() {
     document.getElementById('manualSearchStatus').textContent = candidate.checkedIn ? 'This contractor is already checked in.' : candidate.pendingOffline ? 'This contractor is already queued on this device.' : 'This contractor has an incomplete check-in record. Ask an administrator to review it.';
     return;
   }
-  verifiedContractor = candidate; activeCheckInMethod = 'MANUAL'; activeQrText = 'MANUAL|' + candidate.registrationId;
+  activeCheckInMethod = 'MANUAL'; activeQrText = 'MANUAL|' + candidate.registrationId;
   document.getElementById('groupPanel').querySelector('.title').textContent = 'Contractor Selected · Manual Check-in';
-  document.getElementById('contractorName').textContent = candidate.name;
-  document.getElementById('contractorCompany').textContent = candidate.company;
-  document.getElementById('companionRows').replaceChildren();
-  document.getElementById('groupPanel').style.display = 'block';
-  document.getElementById('scanButton').style.display = 'none';
+  populateVerifiedGroup_(candidate);
   document.getElementById('manualSearchStatus').textContent = 'Contractor selected from the active registration list. Verify the person is physically present before confirming.';
   setResult(navigator.onLine === false ? 'warning' : 'info', navigator.onLine === false ? 'OFFLINE MANUAL CHECK-IN SELECTED' : 'MANUAL CHECK-IN SELECTED', candidate.name + '\n' + candidate.company + '\n' + (navigator.onLine === false ? 'This is a saved roster match. The check-in will remain provisional until reconciled.' : 'The server will re-check registration and duplicate attendance before saving.'));
   document.getElementById('groupPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function companionLimit_(candidate) {
+  const seats = Number(candidate && candidate.reservedSeats || 0);
+  return seats > 0 ? Math.max(0, seats - 1) : 500; // Legacy registrations without a seat allocation remain compatible.
+}
+function updateCompanionAddState_() {
+  const button = document.getElementById('addCompanionButton');
+  const current = document.querySelectorAll('#companionRows input').length;
+  const max = companionLimit_(verifiedContractor);
+  button.disabled = current >= max;
+  button.textContent = current >= max ? 'RESERVED COMPANION LIMIT REACHED' : '＋ ADD COMPANION';
+  const table = verifiedContractor && verifiedContractor.reservedSeats ? verifiedContractor.reservedSeats + ' reserved seat(s) including representative' : 'Legacy record · no reserved-seat cap on file';
+  document.getElementById('companionInstruction').textContent = 'Pre-registered names are prefilled. Confirm who is physically present and edit or replace as needed. ' + (verifiedContractor && verifiedContractor.reservedSeats ? 'Maximum companions: ' + max + '. ' + table + '.' : table + '.');
+}
+function renderGroupContext_(candidate) {
+  const meta = document.getElementById('groupMeta'); meta.replaceChildren();
+  const facts = [
+    ['Assigned Table', candidate.tableNumber || 'Not assigned'],
+    ['Reserved Seats', candidate.reservedSeats ? String(candidate.reservedSeats) + ' total' : 'Not specified'],
+    ['Transportation', candidate.transportationMode || 'Not specified'],
+    ['Shuttle Pick-up', candidate.shuttlePickUpSite || (candidate.transportationMode === 'Company Service / Shuttle' ? 'Not assigned' : 'N/A')]
+  ];
+  facts.forEach(function(item) {
+    const cell = document.createElement('div'); const label = document.createElement('b'); label.textContent = item[0]; const value = document.createElement('span'); value.textContent = item[1]; cell.append(label, value); meta.appendChild(cell);
+  });
+  const alerts = [];
+  if (candidate.offlineMode) {
+    alerts.push('SAFETY DETAILS NOT AVAILABLE OFFLINE. Contact the designated event safety lead for the restricted medical / allergy reference.');
+  } else {
+    if (String(candidate.medicalConditions || '').trim()) alerts.push('MEDICAL: ' + candidate.medicalConditions);
+    if (String(candidate.foodAllergies || '').trim()) alerts.push('FOOD / DIETARY: ' + candidate.foodAllergies);
+  }
+  const alertBox = document.getElementById('groupSafetyAlerts'); alertBox.replaceChildren();
+  if (alerts.length) {
+    const heading = document.createElement('strong'); heading.textContent = 'SAFETY / CATERING ALERT — HANDLE PRIVATELY'; alertBox.appendChild(heading);
+    alerts.forEach(function(line) { const div = document.createElement('div'); div.textContent = line; alertBox.appendChild(div); });
+    alertBox.style.display = 'block';
+  } else alertBox.style.display = 'none';
+}
+function populateVerifiedGroup_(candidate) {
+  verifiedContractor = candidate;
+  document.getElementById('contractorName').textContent = candidate.name || '';
+  document.getElementById('contractorCompany').textContent = candidate.company || '';
+  document.getElementById('companionRows').replaceChildren();
+  renderGroupContext_(candidate);
+  const preregistered = Array.isArray(candidate.preRegisteredCompanionNames) ? candidate.preRegisteredCompanionNames : [];
+  preregistered.forEach(function(name) { addCompanionRow(name); });
+  updateCompanionAddState_();
+  document.getElementById('groupPanel').style.display = 'block';
+  document.getElementById('scanButton').style.display = 'none';
+  document.getElementById('groupPanel').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function handleQr(decodedText) {
@@ -953,10 +995,15 @@ function handleQr(decodedText) {
 
 function addCompanionRow(value) {
   const container = document.getElementById('companionRows');
+  const limit = companionLimit_(verifiedContractor);
+  if (container.querySelectorAll('input').length >= limit) {
+    updateCompanionAddState_();
+    return;
+  }
   const row = document.createElement('div'); row.className = 'comp-row';
   const input = document.createElement('input'); input.type = 'text'; input.maxLength = 150; input.placeholder = 'Companion full name'; input.value = value || ''; input.setAttribute('aria-label', 'Companion full name');
-  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.title = 'Remove companion'; remove.onclick = function() { row.remove(); };
-  row.append(input, remove); container.appendChild(row); input.focus();
+  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.title = 'Remove companion'; remove.onclick = function() { row.remove(); updateCompanionAddState_(); };
+  row.append(input, remove); container.appendChild(row); updateCompanionAddState_();
 }
 
 function confirmGroup() {
@@ -964,6 +1011,8 @@ function confirmGroup() {
   const inputs = Array.from(document.querySelectorAll('#companionRows input'));
   const names = inputs.map(input => input.value.trim());
   if (names.some(name => !name)) { setResult('error', 'COMPANION NAME REQUIRED', 'Complete every companion name or remove the empty row.'); return; }
+  const maxCompanions = companionLimit_(verifiedContractor);
+  if (names.length > maxCompanions) { setResult('error', 'RESERVED SEAT LIMIT EXCEEDED', 'This invitation allows up to ' + maxCompanions + ' companion(s). Remove excess entries before confirming.'); return; }
   if (!window.confirm('Confirm attendance for ' + verifiedContractor.name + ' and ' + names.length + ' companion(s)?\n\nLate companions cannot be added after confirmation.')) return;
 
   const online = navigator.onLine !== false;
