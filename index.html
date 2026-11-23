@@ -16,13 +16,14 @@
     .venue{margin:12px auto;padding:10px;border:1px solid rgba(214,173,87,.2);border-radius:9px;background:rgba(214,173,87,.06);text-align:center;color:#e7dfd0;font-size:11px;line-height:1.6}.venue b{color:var(--gold2)}.mapLink{color:var(--gold2);font-weight:800;text-decoration:none;border-bottom:1px solid var(--gold)}
     .staff,.network,.notice{margin-top:10px;padding:10px 12px;border-radius:9px;font-size:11px;line-height:1.5;text-align:center}.staff{background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.2);color:#e7d6ad}.network{background:rgba(55,112,77,.12);border:1px solid rgba(125,196,145,.25);color:#d5efdc}.network.offline{background:rgba(150,44,40,.18);border-color:rgba(239,183,174,.4);color:#ffe2dd}.notice{display:none;text-align:left;background:rgba(214,173,87,.12);border:1px solid rgba(246,223,154,.42);color:#ffe9b2}
     .toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:11px}.toolbar .wide{grid-column:1/-1}
+    .laneBox{margin-top:12px;padding:10px;border:1px solid rgba(214,173,87,.25);border-radius:10px;background:rgba(214,173,87,.05)}.laneTitle{font-size:10px;color:var(--gold2);font-weight:800;letter-spacing:1px;margin-bottom:8px}.laneButtons{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.laneButtons button{padding:10px 6px;font-size:9px;letter-spacing:.2px}.laneButtons button.active{outline:2px solid var(--gold2);box-shadow:0 0 0 3px rgba(214,173,87,.12)}.laneHint{font-size:10px;color:var(--muted);margin-top:7px;line-height:1.4}
     button{border:1px solid #f2d58c;border-radius:9px;padding:13px 12px;font-size:11px;letter-spacing:.45px;font-weight:800;cursor:pointer;width:100%;background:linear-gradient(110deg,#9e7228,#e4bf68 48%,#b98736);color:#10182a}button.secondary{background:transparent;color:var(--gold2);border-color:rgba(214,173,87,.45)}button.danger{background:#692e33;color:#fff1eb;border-color:#a75b5e}button:disabled{opacity:.5;cursor:not-allowed}
     #reader{width:100%;overflow:hidden;border-radius:11px;background:#030711;min-height:70px;margin-top:13px;border:1px solid rgba(214,173,87,.3)}#reader video{object-fit:cover}
     #result{margin-top:13px;border-radius:10px;padding:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);min-height:76px;display:flex;flex-direction:column;justify-content:center;gap:6px;white-space:pre-line;overflow-wrap:anywhere;color:#e3e8f0}.title{font-family:Georgia,serif;font-size:18px;color:var(--gold2)}.detail{font-size:12px;line-height:1.55}.success{background:rgba(55,112,77,.22)!important;color:#e0f7e6}.warning{background:rgba(157,111,37,.22)!important;color:#ffedbd}.error{background:rgba(150,44,40,.22)!important;color:#ffe2dd}.info{background:rgba(40,83,140,.25)!important;color:#dceaff}
     #groupPanel{display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:11px;background:rgba(2,10,27,.46)}.person{background:rgba(214,173,87,.08);border:1px solid rgba(214,173,87,.18);border-radius:9px;padding:12px;margin-top:8px;text-align:left}.person strong{display:block;font-family:Georgia,serif;font-size:17px;color:var(--gold2);margin:5px 0}.person span{font-size:11px;color:#c5cfdd;display:block}.typeBadge{display:inline-block!important;width:max-content;padding:4px 8px;border-radius:6px;background:rgba(214,173,87,.15);border:1px solid rgba(214,173,87,.4);color:#f6df9a!important;font-size:10px!important;font-weight:800;letter-spacing:.6px}.typeBadge.committee{background:rgba(55,121,160,.22);border-color:rgba(133,200,229,.55);color:#d5f1ff!important}.typeBadge.provisional{background:rgba(157,111,37,.24);border-color:rgba(246,223,154,.55)}
     label{display:block;font-weight:700;font-size:10px;margin:13px 0 6px;text-transform:uppercase;color:var(--gold2);letter-spacing:1px}input,select{width:100%;padding:12px;border:1px solid rgba(214,173,87,.36);border-radius:9px;font-size:15px;outline:none;background:#061329;color:var(--cream)}input::placeholder{color:#8290a7}input:focus,select:focus{border-color:var(--gold2)}.comp-row{display:flex;gap:7px;margin-top:8px}.comp-row input{flex:1;min-width:0}.comp-row button{width:42px;min-width:42px;margin:0;padding:8px;background:#692e33;color:#fff1eb;border-color:#a75b5e}.hint{font-size:11px;color:#b9c4d5;line-height:1.5;margin-top:8px}.foot{text-align:center;font-size:9px;color:#8b98ad;margin-top:17px;letter-spacing:2px}
     .panel{margin-top:13px;border:1px solid rgba(214,173,87,.25);border-radius:10px;background:rgba(214,173,87,.045);padding:12px}.panel summary{cursor:pointer;color:var(--gold2);font-size:11px;font-weight:800;letter-spacing:.6px}.searchrow{display:flex;gap:7px;margin-top:9px}.searchrow input{flex:1;min-width:0}.searchrow button{width:94px}.queueList{display:grid;gap:7px;margin-top:9px;max-height:220px;overflow:auto}.queueItem{padding:9px;border-radius:8px;background:rgba(2,10,27,.5);border:1px solid rgba(214,173,87,.13);font-size:11px;line-height:1.4}.queueItem strong{color:var(--gold2)}.queueItem .state{float:right;font-size:9px;font-weight:bold;letter-spacing:.5px}.state.pending{color:#ffe3a2}.state.review{color:#ffb7ad}
-    @media(max-width:480px){body{padding:8px}.app{padding:13px}.toolbar{grid-template-columns:1fr}.toolbar .wide{grid-column:auto}.searchrow{flex-direction:column}.searchrow button{width:100%}}
+    @media(max-width:480px){.laneButtons{grid-template-columns:repeat(2,minmax(0,1fr))}body{padding:8px}.app{padding:13px}.toolbar{grid-template-columns:1fr}.toolbar .wide{grid-column:auto}.searchrow{flex-direction:column}.searchrow button{width:100%}}
   </style>
 </head>
 <body>
@@ -37,6 +38,17 @@
   <div class="staff" id="staffLine">Connecting to the secure Apps Script scanner launcher…</div>
   <div class="network" id="networkState">Checking network status…</div>
   <div class="notice" id="offlineNotice">OFFLINE MODE: Local roster matching is provisional. Check-ins are saved only on this device and are NOT official until server reconciliation succeeds.</div>
+
+  <section class="laneBox" aria-label="Entrance lane selection">
+    <div class="laneTitle">SELECT ENTRANCE LANE</div>
+    <div class="laneButtons">
+      <button class="active" type="button" data-lane="ALL">ALL CHECK-IN</button>
+      <button class="secondary" type="button" data-lane="CONTRACTOR">CONTRACTORS</button>
+      <button class="secondary" type="button" data-lane="COMMITTEE">COMMITTEE</button>
+      <button class="secondary" type="button" data-lane="ASSISTANCE">ASSISTANCE</button>
+    </div>
+    <div class="laneHint" id="laneHint">All registered attendees can be checked in at this station. Use Assistance for QR recovery or manual search.</div>
+  </section>
 
   <div class="toolbar">
     <button id="scanButton" class="wide" type="button" disabled>CONNECTING…</button>
@@ -54,6 +66,7 @@
     <summary>QR NOT WORKING? USE MANUAL CHECK-IN</summary>
     <div class="hint">Search active Attending registrations. Offline results come from the last downloaded roster and remain provisional until synced.</div>
     <div class="searchrow"><input id="manualSearchInput" type="search" maxlength="120" placeholder="Name, company, committee/team, or ID"><button class="secondary" id="manualSearchButton" type="button">SEARCH</button></div>
+    <label for="manualLaneFilter">Manual search lane</label><select id="manualLaneFilter" aria-label="Manual search lane"><option value="ALL">All attendees</option><option value="CONTRACTOR">Contractors only</option><option value="COMMITTEE">Committee only</option></select>
     <select id="manualCandidateSelect" aria-label="Registration search results"><option value="">Search to load attendees</option></select>
     <button class="secondary" id="manualUseButton" type="button" disabled>CONTINUE MANUAL CHECK-IN</button>
     <div class="hint" id="manualSearchStatus">Manual search does not bypass server validation when online. Offline selections are tagged as provisional.</div>
@@ -93,7 +106,7 @@ const STORE_ROSTER = 'roster';
 const STORE_QUEUE = 'queue';
 const STORE_META = 'meta';
 const PARENT_ORIGIN = validateParentOrigin_(new URLSearchParams(location.search).get('parentOrigin'));
-const BRIDGE_VERSION = '14';
+const BRIDGE_VERSION = '15';
 const BRIDGE_COMPATIBLE = new URLSearchParams(location.hash.replace(/^#/, '')).get('bridgeVersion') === BRIDGE_VERSION;
 let db = null;
 let scanner = null;
@@ -107,6 +120,11 @@ let activeMethod = 'QR';
 let activeMode = 'ONLINE';
 let activeQueueId = '';
 let manualCandidates = [];
+let laneMode = 'ALL';
+let scannerDeviceId = '';
+let heartbeatTimer = null;
+let heartbeatBusy = false;
+let lastSuccessfulCheckInAt = '';
 let pendingBridge = Object.create(null);
 let syncBusy = false;
 let queueRefreshBusy = false;
@@ -202,6 +220,7 @@ async function saveRoster(response){
 }
 async function initLocalState(){
   await openDatabase();
+  try{lastSuccessfulCheckInAt=localStorage.getItem('eaLastSuccessfulCheckInAt')||'';}catch(e){}
   try { if(navigator.storage && navigator.storage.persist) localStoragePersisted = await navigator.storage.persist(); } catch(e) { localStoragePersisted = false; }
   await saveMeta('storagePersisted',localStoragePersisted);
   const meta=await getMeta('roster');lastRosterMeta=meta&&meta.value||null;
@@ -234,6 +253,23 @@ async function updateQueueUI(){
 }
 function queueExistsInPage(){return !!activeRecord;}
 function extractRegistrationId(qrText){const raw=String(qrText||'').trim();const prefixes=['EVENTATTENDANCE|','EVENT_ATTENDANCE:'];for(const prefix of prefixes){if(raw.toUpperCase().indexOf(prefix)===0){const id=raw.slice(prefix.length).trim();return /^[A-Za-z0-9_-]{6,120}$/.test(id)?id:'';}}return '';}
+function laneMatches(record){
+  if(laneMode==='ALL'||laneMode==='ASSISTANCE')return true;
+  const type=String(record.registrationType||'CONTRACTOR').toUpperCase();
+  return laneMode===type;
+}
+function setEntranceLane(mode){
+  laneMode=['ALL','CONTRACTOR','COMMITTEE','ASSISTANCE'].includes(mode)?mode:'ALL';
+  document.querySelectorAll('[data-lane]').forEach(button=>{
+    const active=button.getAttribute('data-lane')===laneMode;
+    button.classList.toggle('active',active);
+    if(active)button.classList.remove('secondary');else if(!button.classList.contains('secondary'))button.classList.add('secondary');
+  });
+  const hints={ALL:'All registered attendees can be checked in at this station. Use Assistance for QR recovery or manual search.',CONTRACTOR:'Contractor-only lane. Committee QR codes will be redirected to the Committee lane.',COMMITTEE:'Committee express lane. Committee members have one reserved seat by default and no companion entry.',ASSISTANCE:'Assistance lane: manual search, unreadable QR recovery and registration exceptions.'};
+  byId('laneHint').textContent=hints[laneMode];
+  if(laneMode==='ASSISTANCE'){byId('manualFallback').open=true;byId('manualSearchInput').focus();}
+  const filter=byId('manualLaneFilter');if(filter)filter.value=laneMode==='ASSISTANCE'?'ALL':laneMode;
+}
 function renderRegistrant(record,mode,method){
   activeRecord=record;activeMode=mode;activeMethod=method||'QR';
   const isCommittee=String(record.registrationType||'CONTRACTOR').toUpperCase()==='COMMITTEE';
@@ -258,6 +294,7 @@ async function resolveOfflineQr(qrText,method){
   const id=extractRegistrationId(qrText);if(!id){setResult('error','QR NOT RECOGNIZED OFFLINE','This QR format cannot be matched to the downloaded roster. Reconnect or use manual check-in.');return;}
   const record=await getRoster(id);if(!record){setResult('error','NOT IN OFFLINE ROSTER','This Registration ID is not included in the roster stored on this device. Reconnect and refresh the roster, or use the assistance lane.');return;}
   if(record.checkedIn){showAlready({registrationType:record.registrationType,committeeTeam:record.committeeTeam,name:record.name,timestamp:record.checkedInAt});return;}
+  if(!laneMatches(record)){setResult('warning','WRONG ENTRANCE LANE',(record.registrationType==='COMMITTEE'?'[COMMITTEE MEMBER] ':'[CONTRACTOR] ')+(record.name||id)+' should proceed to the '+(record.registrationType==='COMMITTEE'?'Committee':'Contractor')+' lane. No attendance was saved.');return;}
   const queued=await getQueueByReg(id);if(queued){setResult('warning','ALREADY QUEUED ON THIS DEVICE',(record.name||id)+' is already waiting for server reconciliation. Do not create another local check-in.');return;}
   renderRegistrant(record,'OFFLINE',method||'QR');setResult('warning','PROVISIONAL OFFLINE MATCH','Matched from the last downloaded roster. This is not an official attendance record until the online server accepts the queued check-in.');
 }
@@ -269,6 +306,7 @@ async function handleQr(decodedText){
   try{
     const response=await parentRequest('EVENT_GROUP_PREPARE','EVENT_GROUP_PREPARE_RESULT',{qrText:decodedText},38000);
     if(response.status==='VERIFIED'){
+      if(!laneMatches(response)){setResult('warning','WRONG ENTRANCE LANE',(response.registrationType==='COMMITTEE'?'[COMMITTEE MEMBER] ':'[CONTRACTOR] ')+response.name+' should proceed to the '+(response.registrationType==='COMMITTEE'?'Committee':'Contractor')+' lane. No attendance was saved.');return;}
       renderRegistrant(response,'ONLINE','QR');const committee=response.registrationType==='COMMITTEE';
       setResult('success',committee?'[COMMITTEE MEMBER] VERIFIED':'CONTRACTOR VERIFIED',response.name+'\n'+(committee?'Committee / Team: '+(response.committeeTeam||'Committee'):response.company)+'\nServer verification completed in '+(response.serverMs||'—')+' ms.');
     }else if(response.status==='ALREADY_CHECKED_IN'){showAlready(response);clearActive();}
@@ -303,7 +341,7 @@ async function confirmGroup(){
   try{
     const response=await parentRequest('EVENT_GROUP_COMPLETE','EVENT_GROUP_COMPLETE_RESULT',{payload:{registrationId:queueItem.registrationId,registrationRow:queueItem.registrationRow,companionNames:names,method:queueItem.method,queueId:queueItem.queueId}},80000);
     if(response.status==='SUCCESS'||response.status==='ALREADY_CHECKED_IN'){
-      await deleteQueue(queueItem.registrationId);const local=await getRoster(queueItem.registrationId);if(local){local.checkedIn=true;local.checkedInAt=response.timestamp||new Date().toISOString();local.queuedForSync=false;await dbRequest(STORE_ROSTER,'readwrite','put',local);}
+      await deleteQueue(queueItem.registrationId);lastSuccessfulCheckInAt=response.timestamp||new Date().toISOString();try{localStorage.setItem('eaLastSuccessfulCheckInAt',lastSuccessfulCheckInAt);}catch(e){};const local=await getRoster(queueItem.registrationId);if(local){local.checkedIn=true;local.checkedInAt=response.timestamp||new Date().toISOString();local.queuedForSync=false;await dbRequest(STORE_ROSTER,'readwrite','put',local);}
       await updateQueueUI();
       const title=response.status==='ALREADY_CHECKED_IN'?'ALREADY CHECKED IN':(committee?'[COMMITTEE MEMBER] CHECK-IN COMPLETE':'GROUP CHECK-IN COMPLETE');
       setResult(response.status==='SUCCESS'?'success':'warning',title,(committee?'[COMMITTEE MEMBER] · '+(response.committeeTeam||queueItem.committeeTeam):response.company)+'\n'+response.name+'\nTotal people: '+(response.totalPeople||1)+'\n'+(committee?'Raffle: Not Applicable':'Raffle ticket: '+(response.raffleTicketNumber||'—'))+'\nRecorded by: '+(response.checkedInBy||staffName));
@@ -392,7 +430,7 @@ async function searchManualCandidates(){
     let results=[];
     if(!navigator.onLine){const all=await getRosterAll();const key=q.toLowerCase();results=all.filter(r=>[r.registrationId,r.name,r.company,r.committeeTeam].some(v=>String(v||'').toLowerCase().includes(key))).slice(0,60);}
     else{const response=await parentRequest('EVENT_MANUAL_SEARCH','EVENT_MANUAL_SEARCH_RESULT',{query:q},45000);if(response.status!=='SUCCESS')throw new Error(response.message||'Manual search failed.');results=response.results||[];}
-    manualCandidates=results;const first=document.createElement('option');first.value='';first.textContent=results.length?'Select the matching attendee…':'No matching active registrant';select.appendChild(first);
+    results=results.filter(r=>laneMatches(r));manualCandidates=results;const first=document.createElement('option');first.value='';first.textContent=results.length?'Select the matching attendee…':'No matching attendee in the selected lane';select.appendChild(first);
     results.forEach((r,i)=>{const o=document.createElement('option');o.value=String(i);const com=r.registrationType==='COMMITTEE';o.textContent=(com?'[COMMITTEE] ':'')+(r.name||'Unknown')+' — '+(com?(r.committeeTeam||'Committee'):(r.company||'No company'))+(r.checkedIn?' · CHECKED IN':'');if(r.checkedIn||r.blocked)o.disabled=true;select.appendChild(o);});
     byId('manualUseButton').disabled=!results.length;byId('manualSearchStatus').textContent=results.length+' matching record(s). '+(navigator.onLine?'Server-backed results.':'Offline roster results are provisional only.');
   }catch(err){byId('manualSearchStatus').textContent=err.message;}
@@ -401,6 +439,7 @@ async function searchManualCandidates(){
 async function useManualCandidate(){
   const idx=Number(byId('manualCandidateSelect').value);if(!Number.isInteger(idx)||!manualCandidates[idx])return;const record=manualCandidates[idx];
   if(record.checkedIn||record.blocked){byId('manualSearchStatus').textContent='This record is already checked in or requires review.';return;}
+  if(!laneMatches(record)){byId('manualSearchStatus').textContent='This attendee belongs to another entrance lane.';return;}
   const queued=await getQueueByReg(record.registrationId);if(queued){byId('manualSearchStatus').textContent='This registration is already queued on this device.';return;}
   renderRegistrant(record,navigator.onLine?'ONLINE':'OFFLINE','MANUAL');setResult(navigator.onLine?'warning':'warning','MANUAL REGISTRANT SELECTED',record.name+'\n'+(record.registrationType==='COMMITTEE'?'[COMMITTEE MEMBER] · '+(record.committeeTeam||'Committee'):record.company)+'\nVerify the attendee is physically present before confirming.');
 }
@@ -412,17 +451,44 @@ async function startCamera(){
   try{
     scanner=new Html5Qrcode('reader');
     await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:250},aspectRatio:1.0},handleQr,()=>{});
-    cameraRunning=true;byId('scanButton').textContent='CAMERA ACTIVE';byId('scanButton').disabled=true;setResult('success','CAMERA READY',navigator.onLine?'Scan an attendee QR code.':'Offline queue is active; locally matched scans are provisional.');
+    cameraRunning=true;byId('scanButton').textContent='CAMERA ACTIVE';byId('scanButton').disabled=true;sendDeviceHeartbeat();setResult('success','CAMERA READY',navigator.onLine?'Scan an attendee QR code.':'Offline queue is active; locally matched scans are provisional.');
   }catch(err){byId('scanButton').disabled=false;byId('scanButton').textContent='RETRY CAMERA';setResult('error','CAMERA COULD NOT START',explainCameraError(err));}
 }
 function explainCameraError(e){const m=String(e&&e.message||e);if(/NotAllowedError|Permission/i.test(m))return 'Camera permission was denied. Allow camera access for this GitHub Pages site.';if(/NotFoundError|DevicesNotFoundError/i.test(m))return 'No camera was found on this device.';if(/NotReadableError|TrackStartError/i.test(m))return 'The camera may be in use by another app. Close other camera apps and retry.';return m;}
+function getScannerDeviceId(){
+  if(scannerDeviceId)return scannerDeviceId;
+  try{scannerDeviceId=localStorage.getItem('eaScannerDeviceId')||'';}catch(e){}
+  if(!/^[A-Za-z0-9_-]{12,80}$/.test(scannerDeviceId)){
+    scannerDeviceId=makeId();
+    try{localStorage.setItem('eaScannerDeviceId',scannerDeviceId);}catch(e){}
+  }
+  return scannerDeviceId;
+}
+async function sendDeviceHeartbeat(){
+  if(!authenticated||heartbeatBusy||!db||!window.opener||window.opener.closed)return;
+  heartbeatBusy=true;
+  try{
+    const queue=await getQueueAll();
+    const pending=queue.filter(q=>q.status==='PENDING'||q.status==='SENDING').length;
+    const review=queue.filter(q=>q.status==='NEEDS_REVIEW').length;
+    const payload={deviceId:getScannerDeviceId(),scannerBuild:'V15',networkOnline:navigator.onLine===true,cameraActive:cameraRunning,queuePending:pending,queueReview:review,rosterCount:Number(lastRosterMeta&&lastRosterMeta.count||0),rosterGeneratedAt:String(lastRosterMeta&&lastRosterMeta.generatedAt||''),lastSuccessfulCheckInAt:lastSuccessfulCheckInAt,storagePersisted:localStoragePersisted};
+    await parentRequest('EVENT_DEVICE_HEARTBEAT','EVENT_DEVICE_HEARTBEAT_RESULT',{payload:payload},12000);
+  }catch(e){/* heartbeat is monitoring-only and must never block check-in */}
+  finally{heartbeatBusy=false;}
+}
+function scheduleDeviceHeartbeat(){
+  if(heartbeatTimer)clearInterval(heartbeatTimer);
+  heartbeatTimer=setInterval(sendDeviceHeartbeat,45000);
+  setTimeout(sendDeviceHeartbeat,2500);
+}
 function receiveParentMessage(event){
   if(event.source!==window.opener||!PARENT_ORIGIN||event.origin!==PARENT_ORIGIN)return;
   const data=event.data;if(!data||typeof data!=='object'||String(data.bridgeVersion||'')!==BRIDGE_VERSION)return;
   if(data.type==='EVENT_SCANNER_AUTH'){
     if(data.authenticated!==true||typeof data.scannerToken!=='string'||!data.scannerToken.startsWith('EA1.'))return;
     authenticated=true;scannerTokenInMemory=data.scannerToken;staffName=String(data.staffName||'Entrance Staff');byId('staffLine').textContent='AUTHENTICATED SCANNER SESSION · '+staffName+' · Token held in memory only';
-    byId('scanButton').disabled=false;byId('scanButton').textContent='START LIVE CAMERA SCANNER';networkStatus();initLocalState().then(()=>{networkStatus();setResult('info','SCANNER CONNECTED','Download or refresh the offline roster before doors open. Keep this Apps Script launcher open.');}).catch(e=>setResult('warning','LOCAL OFFLINE STORAGE UNAVAILABLE',e.message));return;
+    getScannerDeviceId();
+    byId('scanButton').disabled=false;byId('scanButton').textContent='START LIVE CAMERA SCANNER';networkStatus();initLocalState().then(()=>{networkStatus();scheduleDeviceHeartbeat();setResult('info','SCANNER CONNECTED','Download or refresh the offline roster before doors open. Keep this Apps Script launcher open.');}).catch(e=>setResult('warning','LOCAL OFFLINE STORAGE UNAVAILABLE',e.message));return;
   }
   const pending=pendingBridge[String(data.requestId||'')];
   if(pending&&data.type===pending.expectedType){clearTimeout(pending.timer);delete pendingBridge[data.requestId];pending.resolve(data.response||{});return;}
@@ -443,6 +509,8 @@ byId('exportQueueButton').addEventListener('click',exportQueueCsv);
 byId('queueDetailsButton').addEventListener('click',toggleQueuePanel);
 byId('clearLocalButton').addEventListener('click',clearLocalDataAfterEvent);
 byId('manualSearchButton').addEventListener('click',searchManualCandidates);
+byId('manualLaneFilter').addEventListener('change',e=>setEntranceLane(e.target.value));
+document.querySelectorAll('[data-lane]').forEach(button=>button.addEventListener('click',()=>setEntranceLane(button.getAttribute('data-lane'))));
 byId('manualSearchInput').addEventListener('keydown',e=>{if(e.key==='Enter')searchManualCandidates();});
 byId('manualCandidateSelect').addEventListener('change',()=>{byId('manualUseButton').disabled=byId('manualCandidateSelect').value==='';});
 byId('manualUseButton').addEventListener('click',useManualCandidate);
@@ -450,8 +518,8 @@ byId('addCompanionButton').addEventListener('click',()=>addCompanionRow());
 byId('confirmButton').addEventListener('click',confirmGroup);
 byId('cancelButton').addEventListener('click',()=>{if(busy)return;activeRecord=null;byId('groupPanel').style.display='none';byId('scanButton').style.display='block';setResult('info','READY FOR NEXT REGISTRANT','No Attendance record was written. Scan the next QR code.');});
 window.addEventListener('message',receiveParentMessage);
-window.addEventListener('online',()=>{networkStatus();setTimeout(()=>{if(authenticated)syncOfflineQueue();},1200);});
-window.addEventListener('offline',networkStatus);
+window.addEventListener('online',()=>{networkStatus();setTimeout(()=>{if(authenticated){sendDeviceHeartbeat();syncOfflineQueue();}},1200);});
+window.addEventListener('offline',()=>{networkStatus();sendDeviceHeartbeat();});
 window.addEventListener('load',()=>{
   networkStatus();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
