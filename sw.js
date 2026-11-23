@@ -1,64 +1,62 @@
-/* APEC Gala Attendance — V13 invitation and registration sync. */
-const CACHE_NAME = 'apec-gala-attendance-v13-invitation';
-const REQUIRED_ASSETS = [
-  './',
-  './index.html',
-  './vendor/html5-qrcode-2.3.8.min.js'
-];
-const OPTIONAL_ASSETS = ['./event-poster.jpg'];
+'use strict';
+const CACHE_NAME = 'apec-gala-scanner-shell-v2';
+const CORE = ['./', './index.html', './manifest.webmanifest'];
+const OPTIONAL = ['./event-poster.jpg'];
+const QR_LIB = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    // Fail installation if the exact pinned scanner library is missing or unavailable.
-    // This prevents a false-positive "offline ready" state with a broken camera scanner.
-    await cache.addAll(REQUIRED_ASSETS);
-    await Promise.allSettled(OPTIONAL_ASSETS.map(async path => {
-      const response = await fetch(path, { cache: 'reload' });
-      if (response.ok) await cache.put(path, response.clone());
-    }));
+    // Keep shell installation resilient: one missing optional poster must not
+    // prevent the scanner itself from becoming available offline.
+    for (const url of CORE) {
+      try {
+        const response = await fetch(url, {cache:'reload'});
+        if (response.ok) await cache.put(url, response);
+      } catch (e) { /* A later online launch can populate this asset. */ }
+    }
+    for (const url of OPTIONAL) {
+      try {
+        const response = await fetch(url, {cache:'reload'});
+        if (response.ok) await cache.put(url, response);
+      } catch (e) { /* Poster is decorative; scanner remains usable without it. */ }
+    }
+    try {
+      const response = await fetch(QR_LIB, {mode:'cors', cache:'reload'});
+      if (response.ok) await cache.put(QR_LIB, response);
+    } catch (e) { /* Best effort CDN pre-cache; confirm before the event. */ }
     await self.skipWaiting();
   })());
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k.startsWith('apec-gala-attendance-') && k !== CACHE_NAME).map(k => caches.delete(k)));
+    const names = await caches.keys();
+    await Promise.all(names.filter(n => n.startsWith('apec-gala-scanner-') && n !== CACHE_NAME).map(n => caches.delete(n)));
     await self.clients.claim();
   })());
 });
 
 self.addEventListener('fetch', event => {
-  const request = event.request;
-  const url = new URL(request.url);
-  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
-  if (request.mode === 'navigate') {
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET') return;
+  if (url.origin === self.location.origin || event.request.url === QR_LIB) {
     event.respondWith((async () => {
-      try {
-        const response = await fetch(request);
-        if (response && response.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put('./index.html', response.clone());
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(event.request, {ignoreSearch:true});
+      if (cached) {
+        if (url.origin === self.location.origin) {
+          fetch(event.request).then(r => { if (r.ok) cache.put(event.request, r.clone()); }).catch(()=>{});
         }
+        return cached;
+      }
+      try {
+        const response = await fetch(event.request);
+        if (response.ok) await cache.put(event.request, response.clone());
         return response;
-      } catch (err) {
-        const cache = await caches.open(CACHE_NAME);
-        return (await cache.match('./index.html')) || Response.error();
+      } catch (e) {
+        return new Response('Scanner resource unavailable offline. Reconnect before continuing.', {status:503, headers:{'Content-Type':'text/plain'}});
       }
     })());
-    return;
   }
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request);
-    if (cached) return cached;
-    try {
-      const response = await fetch(request);
-      if (response && response.ok) await cache.put(request, response.clone());
-      return response;
-    } catch (err) {
-      return Response.error();
-    }
-  })());
 });

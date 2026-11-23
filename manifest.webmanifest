@@ -1,0 +1,10 @@
+{
+  "name": "APEC Gala Entrance Scanner",
+  "short_name": "APEC Scanner",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050b1b",
+  "theme_color": "#071128",
+  "icons": []
+}
