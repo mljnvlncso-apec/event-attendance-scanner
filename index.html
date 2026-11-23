@@ -134,10 +134,16 @@ const duplicateCooldown = new Map();
 
 function validateParentOrigin_(value) {
   try {
-    const u = new URL(String(value || ''));
+    const raw = String(value || '');
+    const u = new URL(raw);
     const host = u.hostname.toLowerCase();
-    const allowed = host === 'script.google.com' || host === 'script.googleusercontent.com' || host.endsWith('.script.googleusercontent.com');
-    if (u.protocol !== 'https:' || !allowed || u.origin !== String(value)) throw new Error('not allowed');
+    // Must match the launcher allowlist exactly. Apps Script may serve a
+    // deployment from a generated host such as n-abc123-script.googleusercontent.com.
+    const allowed = host === 'script.google.com' ||
+      host === 'script.googleusercontent.com' ||
+      host.endsWith('.script.googleusercontent.com') ||
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-script\.googleusercontent\.com$/.test(host);
+    if (u.protocol !== 'https:' || u.username || u.password || u.port || !allowed || u.origin !== raw) throw new Error('not allowed');
     return u.origin;
   } catch (e) { return ''; }
 }

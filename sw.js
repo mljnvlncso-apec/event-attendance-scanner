@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_NAME = 'apec-gala-scanner-shell-v15';
+const CACHE_NAME = 'apec-gala-scanner-shell-v15-1';
 const CORE = ['./', './index.html', './manifest.webmanifest'];
 const OPTIONAL = ['./event-poster.jpg'];
 const QR_LIB = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
