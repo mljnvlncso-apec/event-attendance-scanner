@@ -1,10 +1,10 @@
 {
-  "name": "APEC Gala Entrance Scanner",
+  "name": "APEC Gala 2026 Entrance Scanner",
   "short_name": "APEC Scanner",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#050b1b",
+  "background_color": "#020817",
   "theme_color": "#071128",
   "icons": []
 }
